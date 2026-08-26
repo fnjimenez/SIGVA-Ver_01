@@ -794,6 +794,21 @@ body{
       <label style="font-size:.8em;">Monto del abono (MXN)</label>
       <input type="number" id="pagoMontoInput" placeholder="500" min="1" style="width:100%;padding:10px;margin-bottom:6px;border-radius:8px;border:1px solid #ccc;">
       <button class="btn success" id="guardarPagoBtn">✅ Agregar Abono</button>
+
+      <div style="margin-top:18px;padding-top:14px;border-top:2px dashed var(--warning);">
+        <label style="font-weight:700;display:block;margin-bottom:6px;">💸 Registrar Devolución al Alumno</label>
+        <input type="text" id="devolucionMatriculaInput" placeholder="Matrícula/empleado del alumno" style="width:100%;padding:10px;margin-bottom:6px;border-radius:8px;border:1px solid #ccc;">
+        <label style="font-size:.8em;">Monto devuelto (MXN)</label>
+        <input type="number" id="devolucionMontoInput" placeholder="500" min="1" style="width:100%;padding:10px;margin-bottom:6px;border-radius:8px;border:1px solid #ccc;">
+        <label style="font-size:.8em;">Número de cuenta a donde se devolvió</label>
+        <input type="text" id="devolucionCuentaInput" placeholder="Ej. tarjeta terminación 4417, o cuenta CLABE" style="width:100%;padding:10px;margin-bottom:6px;border-radius:8px;border:1px solid #ccc;">
+        <label style="font-size:.8em;">Fecha de la devolución</label>
+        <input type="date" id="devolucionFechaInput" style="width:100%;padding:10px;margin-bottom:6px;border-radius:8px;border:1px solid #ccc;">
+        <label style="font-size:.8em;">Hora de la devolución</label>
+        <input type="time" id="devolucionHoraInput" style="width:100%;padding:10px;margin-bottom:6px;border-radius:8px;border:1px solid #ccc;">
+        <button class="btn warning" id="guardarDevolucionBtn">💸 Registrar Devolución</button>
+      </div>
+
       <div id="listaPagosBox" style="margin-top:14px;"></div>
     </div>
   </div>
@@ -844,7 +859,7 @@ body{
 /* ============================================================
    CONFIGURACIÓN DEL VIAJE - editar aquí lo que cambie cada viaje
    ============================================================ */
-const SIGVA_VERSION = "v2026.08.20-r29"; // Actualizar este texto en cada entrega para poder identificar la versión en pantalla
+const SIGVA_VERSION = "v2026.08.20-r30"; // Actualizar este texto en cada entrega para poder identificar la versión en pantalla
 
 const TRIP_CONFIG = {
   fechaSalida: "2026-08-19T23:00:00-06:00", // Miércoles 19 de agosto, 11:00 PM hora de México (UTC-6)
@@ -1883,6 +1898,7 @@ document.addEventListener("DOMContentLoaded", function () {
   document.getElementById("guardarLayoutBtn").addEventListener("click", guardarLayoutHotel);
   document.getElementById("limpiarParesViejosBtn").addEventListener("click", limpiarParesViejos);
   document.getElementById("guardarPagoBtn").addEventListener("click", agregarAbono);
+  document.getElementById("guardarDevolucionBtn").addEventListener("click", guardarDevolucion);
   document.getElementById("asignarCamaBtn").addEventListener("click", asignarCamaDirecta);
   document.getElementById("asignarAsientoBtn").addEventListener("click", asignarAsientoDirecta);
   document.getElementById("resetPasswordBtn").addEventListener("click", resetearContraseña);
@@ -2234,16 +2250,60 @@ function eliminarAbono(id, registroKey) {
   });
 }
 
+function guardarDevolucion() {
+  if (!isAdmin && !esCoordinador) { showToast("Solo Admin/Coordinadores pueden hacer esto"); return; }
+  const id = document.getElementById("devolucionMatriculaInput").value.trim().toUpperCase();
+  const monto = parseFloat(document.getElementById("devolucionMontoInput").value);
+  const cuenta = document.getElementById("devolucionCuentaInput").value.trim();
+  const fecha = document.getElementById("devolucionFechaInput").value;
+  const hora = document.getElementById("devolucionHoraInput").value;
+  if (!id) { showToast("Escribe la matrícula/empleado del alumno"); return; }
+  if (!monto || monto <= 0) { showToast("Escribe un monto válido"); return; }
+  if (!cuenta) { showToast("Escribe el número de cuenta a donde se devolvió"); return; }
+  if (!fecha) { showToast("Elige la fecha de la devolución"); return; }
+  if (!hora) { showToast("Elige la hora de la devolución"); return; }
+
+  const ref = database.ref(TRIP_CONFIG.firebaseRoot + "/devoluciones/" + id + "/registros").push();
+  ref.set({
+    monto: monto,
+    cuenta: cuenta,
+    fecha: fecha,
+    hora: hora,
+    capturadoPor: sesionId || "admin"
+  }).then(function () {
+    showToast("💸 Devolución de $" + monto + " registrada para " + id);
+    document.getElementById("devolucionMatriculaInput").value = "";
+    document.getElementById("devolucionMontoInput").value = "";
+    document.getElementById("devolucionCuentaInput").value = "";
+    document.getElementById("devolucionFechaInput").value = "";
+    document.getElementById("devolucionHoraInput").value = "";
+    mostrarListaPagos();
+  });
+}
+
+function eliminarDevolucion(id, registroKey) {
+  if (!isAdmin && !esCoordinador) { showToast("Solo Admin/Coordinadores pueden hacer esto"); return; }
+  if (!confirm("¿Eliminar este registro de devolución? No se puede deshacer.")) return;
+  database.ref(TRIP_CONFIG.firebaseRoot + "/devoluciones/" + id + "/registros/" + registroKey).remove().then(function () {
+    showToast("Devolución eliminada");
+    mostrarListaPagos();
+  });
+}
+
 function totalPagadoDe(registrosObj) {
   if (!registrosObj) return 0;
   return Object.values(registrosObj).reduce(function (sum, r) { return sum + (r.monto || 0); }, 0);
 }
 
 function verificarPagoDe(id) {
-  // Devuelve una Promise<number> con el total pagado de CUALQUIER identidad
-  // (útil para revisar el pago del compañero que se va a jalar, no solo el propio).
-  return database.ref(TRIP_CONFIG.firebaseRoot + "/pagos/" + id + "/registros").once("value").then(function (snap) {
-    return totalPagadoDe(snap.val());
+  // Devuelve una Promise<number> con el total NETO (abonos - devoluciones ya
+  // entregadas) de CUALQUIER identidad — útil para revisar el pago del
+  // compañero que se va a jalar, no solo el propio.
+  return Promise.all([
+    database.ref(TRIP_CONFIG.firebaseRoot + "/pagos/" + id + "/registros").once("value"),
+    database.ref(TRIP_CONFIG.firebaseRoot + "/devoluciones/" + id + "/registros").once("value")
+  ]).then(function (snaps) {
+    return totalPagadoDe(snaps[0].val()) - totalPagadoDe(snaps[1].val());
   });
 }
 
@@ -2267,6 +2327,7 @@ function mostrarResumenPendientes() {
     database.ref(root + "/kit_tortuguero/" + id).once("value"),
     database.ref(root + "/epp_checklist/" + id).once("value"),
     database.ref(root + "/pagos/" + id + "/registros").once("value"),
+    database.ref(root + "/devoluciones/" + id + "/registros").once("value"),
     database.ref(root + "/asientos").once("value"),
     database.ref(root + "/camas_hotel").once("value"),
     database.ref(root + "/casas_campamento/propia").once("value"),
@@ -2274,11 +2335,11 @@ function mostrarResumenPendientes() {
   ]).then(function (snaps) {
     const kit = snaps[0].val();
     const epp = snaps[1].val() || {};
-    const totalPagado = totalPagadoDe(snaps[2].val());
-    const asientos = snaps[3].val() || {};
-    const camas = snaps[4].val() || {};
-    const casasPropia = snaps[5].val() || {};
-    const casasGlamping = snaps[6].val() || {};
+    const totalPagado = totalPagadoDe(snaps[2].val()) - totalPagadoDe(snaps[3].val());
+    const asientos = snaps[4].val() || {};
+    const camas = snaps[5].val() || {};
+    const casasPropia = snaps[6].val() || {};
+    const casasGlamping = snaps[7].val() || {};
 
     const tieneAsiento = Object.values(asientos).some(function (a) { return a.usuario === id; });
     const tieneCama = Object.values(camas).some(function (c) { return c.miembros && c.miembros[id]; });
@@ -2605,10 +2666,12 @@ function mostrarListaPagos() {
   const root = TRIP_CONFIG.firebaseRoot;
   Promise.all([
     database.ref(root + "/pagos").once("value"),
+    database.ref(root + "/devoluciones").once("value"),
     database.ref(root + "/asientos").once("value")
   ]).then(function (snaps) {
     const data = snaps[0].val() || {};
-    const asientos = snaps[1].val() || {};
+    const devolData = snaps[1].val() || {};
+    const asientos = snaps[2].val() || {};
     const idsConAsiento = {}; // set de identidades (usuario) que SÍ tienen asiento
     const nombresPorId = {};
     Object.values(asientos).forEach(function (a) {
@@ -2638,17 +2701,29 @@ function mostrarListaPagos() {
     html += '<p style="font-size:.8em;font-weight:700;margin-bottom:4px;margin-top:10px;">💰 Abonos registrados (' + ids.length + ' personas):</p>';
     ids.forEach(function (id) {
       const registros = data[id].registros || {};
-      const total = totalPagadoDe(registros);
-      const cumple = total >= MONTO_MINIMO_CAMA;
+      const devoluciones = (devolData[id] && devolData[id].registros) || {};
+      const totalAbonos = totalPagadoDe(registros);
+      const totalDevuelto = totalPagadoDe(devoluciones);
+      const neto = totalAbonos - totalDevuelto;
+      const cumple = neto >= MONTO_MINIMO_CAMA;
       const sinAsiento = !idsConAsiento[id];
       const nombreLabel = nombresPorId[id] ? (" — " + nombresPorId[id]) : "";
       html += '<details style="margin-bottom:6px;padding:4px 8px;' + (sinAsiento ? 'border:1px dashed var(--danger);border-radius:8px;' : '') + '">';
       html += '<summary style="cursor:pointer;display:flex;justify-content:space-between;font-size:.85em;">' +
-        '<span>' + (sinAsiento ? "❓" : (cumple ? "✅" : "⏳")) + ' ' + id + nombreLabel + '</span><span>$' + total.toLocaleString() + ' / $' + MONTO_MINIMO_CAMA.toLocaleString() + '</span></summary>';
+        '<span>' + (sinAsiento ? "❓" : (cumple ? "✅" : "⏳")) + ' ' + id + nombreLabel + '</span><span>$' + neto.toLocaleString() + ' neto / $' + MONTO_MINIMO_CAMA.toLocaleString() + '</span></summary>';
+      if (totalDevuelto > 0) {
+        html += '<p style="font-size:.75em;color:var(--muted);margin:4px 0;">Abonado: $' + totalAbonos.toLocaleString() + ' · Devuelto: $' + totalDevuelto.toLocaleString() + ' · <b>Neto: $' + neto.toLocaleString() + '</b></p>';
+      }
       Object.keys(registros).forEach(function (key) {
         const r = registros[key];
-        html += '<div class="participant-row" style="font-size:.8em;"><span>' + r.fecha + ' — $' + r.monto.toLocaleString() + '</span>' +
+        html += '<div class="participant-row" style="font-size:.8em;"><span>💰 ' + r.fecha + ' — $' + r.monto.toLocaleString() + '</span>' +
           '<button class="btn danger" onclick="eliminarAbono(\'' + id + '\', \'' + key + '\')" style="width:auto;padding:3px 10px;">🗑️</button></div>';
+      });
+      Object.keys(devoluciones).forEach(function (key) {
+        const d = devoluciones[key];
+        html += '<div class="participant-row" style="font-size:.8em;background:#fff4e5;border-radius:6px;padding:4px 6px;">' +
+          '<span>💸 ' + d.fecha + ' ' + (d.hora || '') + ' — $' + d.monto.toLocaleString() + ' → cuenta: ' + (d.cuenta || 'sin especificar') + '</span>' +
+          '<button class="btn danger" onclick="eliminarDevolucion(\'' + id + '\', \'' + key + '\')" style="width:auto;padding:3px 10px;">🗑️</button></div>';
       });
       html += '</details>';
     });
@@ -2707,11 +2782,12 @@ function renderCamas() {
 
   Promise.all([
     database.ref(TRIP_CONFIG.firebaseRoot + "/camas_hotel").once("value"),
-    database.ref(TRIP_CONFIG.firebaseRoot + "/pagos/" + idIdentidad() + "/registros").once("value")
+    database.ref(TRIP_CONFIG.firebaseRoot + "/pagos/" + idIdentidad() + "/registros").once("value"),
+    database.ref(TRIP_CONFIG.firebaseRoot + "/devoluciones/" + idIdentidad() + "/registros").once("value")
   ]).then(function (snaps) {
     const camas = snaps[0].val() || {};
     const misRegistros = snaps[1].val();
-    const totalPagado = totalPagadoDe(misRegistros);
+    const totalPagado = totalPagadoDe(misRegistros) - totalPagadoDe(snaps[2].val());
 
     // Pre-escaneo: saber si el usuario ya tiene cama asignada y de qué tipo,
     // para poder calcular su costo total exacto (cama vs. sofá-cama).
@@ -3149,8 +3225,7 @@ function seleccionarCama(key) {
   const info = getCamaLayoutInfo(key);
   const capacidad = info ? info.capacidad : 2;
 
-  database.ref(TRIP_CONFIG.firebaseRoot + "/pagos/" + idIdentidad() + "/registros").once("value").then(function (pagoSnap) {
-    const total = totalPagadoDe(pagoSnap.val());
+  verificarPagoDe(idIdentidad()).then(function (total) {
     if (total < MONTO_MINIMO_CAMA) {
       showToast("⚠️ Necesitas cubrir al menos $" + MONTO_MINIMO_CAMA.toLocaleString() + " (llevas $" + total.toLocaleString() + ") antes de elegir cama.");
       return;
