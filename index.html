@@ -809,6 +809,17 @@ body{
         <button class="btn warning" id="guardarDevolucionBtn">💸 Registrar Devolución</button>
       </div>
 
+      <div style="margin-top:18px;padding-top:14px;border-top:2px dashed var(--primary);">
+        <label style="font-weight:700;display:block;margin-bottom:6px;">🍽️ Gastos Grupales (se reparten entre todos)</label>
+        <p style="font-size:.78em;color:var(--muted);margin-bottom:8px;">Ej. comida grupal, transporte extra, etc. El monto se divide automáticamente entre TODOS los alumnos con asiento registrado. Si alguien ya cooperó en efectivo, captúralo abajo para que no se le cobre de nuevo en su cuenta en línea.</p>
+        <label style="font-size:.8em;">Nombre del gasto</label>
+        <input type="text" id="gastoGrupalNombreInput" placeholder="Ej. Comida grupal día 2" style="width:100%;padding:10px;margin-bottom:6px;border-radius:8px;border:1px solid #ccc;">
+        <label style="font-size:.8em;">Monto total (MXN)</label>
+        <input type="number" id="gastoGrupalMontoInput" placeholder="3500" min="1" style="width:100%;padding:10px;margin-bottom:6px;border-radius:8px;border:1px solid #ccc;">
+        <button class="btn success" id="guardarGastoGrupalBtn">✅ Agregar Gasto Grupal</button>
+        <div id="listaGastosGrupalesBox" style="margin-top:12px;"></div>
+      </div>
+
       <div id="listaPagosBox" style="margin-top:14px;"></div>
     </div>
   </div>
@@ -859,7 +870,7 @@ body{
 /* ============================================================
    CONFIGURACIÓN DEL VIAJE - editar aquí lo que cambie cada viaje
    ============================================================ */
-const SIGVA_VERSION = "v2026.08.20-r30"; // Actualizar este texto en cada entrega para poder identificar la versión en pantalla
+const SIGVA_VERSION = "v2026.08.27-r32"; // Actualizar este texto en cada entrega para poder identificar la versión en pantalla
 
 const TRIP_CONFIG = {
   fechaSalida: "2026-08-19T23:00:00-06:00", // Miércoles 19 de agosto, 11:00 PM hora de México (UTC-6)
@@ -1899,6 +1910,7 @@ document.addEventListener("DOMContentLoaded", function () {
   document.getElementById("limpiarParesViejosBtn").addEventListener("click", limpiarParesViejos);
   document.getElementById("guardarPagoBtn").addEventListener("click", agregarAbono);
   document.getElementById("guardarDevolucionBtn").addEventListener("click", guardarDevolucion);
+  document.getElementById("guardarGastoGrupalBtn").addEventListener("click", guardarGastoGrupal);
   document.getElementById("asignarCamaBtn").addEventListener("click", asignarCamaDirecta);
   document.getElementById("asignarAsientoBtn").addEventListener("click", asignarAsientoDirecta);
   document.getElementById("resetPasswordBtn").addEventListener("click", resetearContraseña);
@@ -2217,6 +2229,7 @@ function revelarPestanaPagos() {
   document.getElementById("pagosSinAcceso").style.display = "none";
   document.getElementById("pagosContenido").style.display = "block";
   mostrarListaPagos();
+  mostrarGastosGrupales();
 }
 
 function agregarAbono() {
@@ -2287,6 +2300,101 @@ function eliminarDevolucion(id, registroKey) {
   database.ref(TRIP_CONFIG.firebaseRoot + "/devoluciones/" + id + "/registros/" + registroKey).remove().then(function () {
     showToast("Devolución eliminada");
     mostrarListaPagos();
+  });
+}
+
+/* ============================================================
+   GASTOS GRUPALES (comida grupal, etc.) — se dividen entre
+   TODOS los alumnos con asiento registrado. Si alguien ya
+   cooperó en efectivo, se captura cuánto para no cobrárselo
+   de nuevo en su cuenta en línea.
+   ============================================================ */
+function guardarGastoGrupal() {
+  if (!isAdmin && !esCoordinador) { showToast("Solo Admin/Coordinadores pueden hacer esto"); return; }
+  const nombre = document.getElementById("gastoGrupalNombreInput").value.trim();
+  const monto = parseFloat(document.getElementById("gastoGrupalMontoInput").value);
+  if (!nombre) { showToast("Escribe el nombre del gasto"); return; }
+  if (!monto || monto <= 0) { showToast("Escribe un monto válido"); return; }
+  database.ref(TRIP_CONFIG.firebaseRoot + "/gastos_grupales").push().set({
+    nombre: nombre, monto: monto, fecha: new Date().toISOString().slice(0, 10), capturadoPor: sesionId || "admin"
+  }).then(function () {
+    showToast("✅ Gasto grupal \"" + nombre + "\" agregado");
+    document.getElementById("gastoGrupalNombreInput").value = "";
+    document.getElementById("gastoGrupalMontoInput").value = "";
+    mostrarGastosGrupales();
+    mostrarListaPagos();
+  });
+}
+
+function eliminarGastoGrupal(key) {
+  if (!isAdmin && !esCoordinador) { showToast("Solo Admin/Coordinadores pueden hacer esto"); return; }
+  if (!confirm("¿Eliminar este gasto grupal por completo? Se recalculará la cuota de todos. No se puede deshacer.")) return;
+  database.ref(TRIP_CONFIG.firebaseRoot + "/gastos_grupales/" + key).remove().then(function () {
+    showToast("Gasto grupal eliminado");
+    mostrarGastosGrupales();
+    mostrarListaPagos();
+  });
+}
+
+function registrarEfectivoGasto(gastoKey) {
+  if (!isAdmin && !esCoordinador) { showToast("Solo Admin/Coordinadores pueden hacer esto"); return; }
+  const id = document.getElementById("efectivoMatricula_" + gastoKey).value.trim().toUpperCase();
+  const monto = parseFloat(document.getElementById("efectivoMonto_" + gastoKey).value);
+  if (!id) { showToast("Escribe la matrícula/empleado del alumno"); return; }
+  if (!monto || monto <= 0) { showToast("Escribe un monto válido"); return; }
+  database.ref(TRIP_CONFIG.firebaseRoot + "/gastos_grupales/" + gastoKey + "/efectivo/" + id).set(monto).then(function () {
+    showToast("✅ Se registró $" + monto + " en efectivo de " + id);
+    mostrarGastosGrupales();
+    mostrarListaPagos();
+  });
+}
+
+function eliminarEfectivoGasto(gastoKey, id) {
+  if (!isAdmin && !esCoordinador) { showToast("Solo Admin/Coordinadores pueden hacer esto"); return; }
+  database.ref(TRIP_CONFIG.firebaseRoot + "/gastos_grupales/" + gastoKey + "/efectivo/" + id).remove().then(function () {
+    showToast("Registro de efectivo eliminado");
+    mostrarGastosGrupales();
+    mostrarListaPagos();
+  });
+}
+
+function mostrarGastosGrupales() {
+  const box = document.getElementById("listaGastosGrupalesBox");
+  if (!box || !database) return;
+  Promise.all([
+    database.ref(TRIP_CONFIG.firebaseRoot + "/gastos_grupales").once("value"),
+    database.ref(TRIP_CONFIG.firebaseRoot + "/asientos").once("value")
+  ]).then(function (snaps) {
+    const gastos = snaps[0].val() || {};
+    const asientos = snaps[1].val() || {};
+    const totalParticipantes = Object.keys(asientos).length || 1;
+    const keys = Object.keys(gastos);
+    if (!keys.length) { box.innerHTML = '<p style="color:#999;font-size:.82em;">Aún no hay gastos grupales capturados.</p>'; return; }
+
+    let html = '<p style="font-size:.78em;color:var(--muted);margin-bottom:6px;">Dividido entre ' + totalParticipantes + ' alumnos con asiento registrado.</p>';
+    keys.forEach(function (key) {
+      const g = gastos[key];
+      const cuota = g.monto / totalParticipantes;
+      const efectivo = g.efectivo || {};
+      html += '<details style="margin-bottom:8px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;">';
+      html += '<summary style="cursor:pointer;font-size:.85em;display:flex;justify-content:space-between;"><span>🍽️ ' + g.nombre + ' — $' + g.monto.toLocaleString() + '</span><span>Cuota: $' + cuota.toFixed(2) + '/persona</span></summary>';
+      html += '<div style="margin-top:8px;">';
+      html += '<label style="font-size:.78em;">Registrar pago en efectivo de un alumno</label>';
+      html += '<input type="text" id="efectivoMatricula_' + key + '" placeholder="Matrícula/empleado" style="width:100%;padding:6px;margin-bottom:4px;border-radius:6px;border:1px solid #ccc;font-size:.85em;">';
+      html += '<input type="number" id="efectivoMonto_' + key + '" placeholder="Monto pagado en efectivo" style="width:100%;padding:6px;margin-bottom:4px;border-radius:6px;border:1px solid #ccc;font-size:.85em;">';
+      html += '<button class="btn success" style="font-size:.8em;padding:6px;" onclick="registrarEfectivoGasto(\'' + key + '\')">✅ Registrar efectivo</button>';
+      if (Object.keys(efectivo).length) {
+        html += '<p style="font-size:.78em;font-weight:700;margin-top:8px;">Ya pagaron en efectivo:</p>';
+        Object.keys(efectivo).forEach(function (id) {
+          html += '<div class="participant-row" style="font-size:.8em;"><span>' + id + ' — $' + efectivo[id].toLocaleString() + '</span>' +
+            '<button class="btn danger" style="width:auto;padding:3px 8px;" onclick="eliminarEfectivoGasto(\'' + key + '\', \'' + id + '\')">🗑️</button></div>';
+        });
+      }
+      html += '</div>';
+      html += '<button class="btn danger" style="margin-top:8px;font-size:.8em;" onclick="eliminarGastoGrupal(\'' + key + '\')">🗑️ Eliminar este gasto completo</button>';
+      html += '</details>';
+    });
+    box.innerHTML = html;
   });
 }
 
@@ -2667,16 +2775,47 @@ function mostrarListaPagos() {
   Promise.all([
     database.ref(root + "/pagos").once("value"),
     database.ref(root + "/devoluciones").once("value"),
-    database.ref(root + "/asientos").once("value")
+    database.ref(root + "/asientos").once("value"),
+    database.ref(root + "/camas_hotel").once("value"),
+    database.ref(root + "/gastos_grupales").once("value")
   ]).then(function (snaps) {
     const data = snaps[0].val() || {};
     const devolData = snaps[1].val() || {};
     const asientos = snaps[2].val() || {};
+    const camas = snaps[3].val() || {};
+    const gastosGrupales = snaps[4].val() || {};
+    const totalParticipantes = Object.keys(asientos).length || 1;
+
+    // Saldo neto de gastos grupales por identidad: suma de (cuota - lo que ya
+    // pagó en efectivo) en TODOS los gastos grupales capturados. Puede salir
+    // negativo si pagó de más en efectivo (eso se suma a su reembolso).
+    function saldoGastosGrupalesDe(id) {
+      return Object.values(gastosGrupales).reduce(function (sum, g) {
+        const cuota = g.monto / totalParticipantes;
+        const pagadoEfectivo = (g.efectivo && g.efectivo[id]) || 0;
+        return sum + (cuota - pagadoEfectivo);
+      }, 0);
+    }
+
     const idsConAsiento = {}; // set de identidades (usuario) que SÍ tienen asiento
     const nombresPorId = {};
     Object.values(asientos).forEach(function (a) {
       idsConAsiento[a.usuario] = true;
       nombresPorId[a.usuario] = a.nombre;
+    });
+
+    // Determinar el tipo de cama (y por lo tanto el costo total real) de cada
+    // identidad, recorriendo el layout del hotel una sola vez.
+    const tipoCamaPorId = {};
+    const layout = TRIP_CONFIG.hotel.layout;
+    layout.forEach(function (room, hIdx) {
+      room.camas.forEach(function (camaTipo, cIdx) {
+        const key = claveCamaLayout(hIdx + 1, cIdx + 1);
+        const cama = camas[key];
+        if (cama && cama.miembros) {
+          Object.keys(cama.miembros).forEach(function (uid) { tipoCamaPorId[uid] = camaTipo.tipo; });
+        }
+      });
     });
 
     const ids = Object.keys(data);
@@ -2698,6 +2837,26 @@ function mostrarListaPagos() {
       });
     }
 
+    // Resumen rápido de reembolsos pendientes (sin tener que abrir cada detalle)
+    const pendientesReembolso = [];
+    ids.forEach(function (id) {
+      const registros = data[id].registros || {};
+      const devoluciones = (devolData[id] && devolData[id].registros) || {};
+      const neto = totalPagadoDe(registros) - totalPagadoDe(devoluciones);
+      const tipoCama = tipoCamaPorId[id];
+      if (!tipoCama) return;
+      const costoTotal = (tipoCama.indexOf("Sofá-cama") === 0 ? COSTO_SOFA_CAMA : COSTO_CAMA_NORMAL) + saldoGastosGrupalesDe(id);
+      if (neto - costoTotal > 0) pendientesReembolso.push({ id: id, nombre: nombresPorId[id] || id, monto: neto - costoTotal });
+    });
+    if (pendientesReembolso.length) {
+      html += '<div class="alert success" style="margin-bottom:10px;">';
+      html += '💸 <b>' + pendientesReembolso.length + ' alumno(s) con reembolso pendiente:</b><ul style="margin-top:6px;">';
+      pendientesReembolso.forEach(function (p) {
+        html += '<li>' + p.nombre + ' — <b>$' + p.monto.toLocaleString() + '</b></li>';
+      });
+      html += '</ul></div>';
+    }
+
     html += '<p style="font-size:.8em;font-weight:700;margin-bottom:4px;margin-top:10px;">💰 Abonos registrados (' + ids.length + ' personas):</p>';
     ids.forEach(function (id) {
       const registros = data[id].registros || {};
@@ -2708,11 +2867,32 @@ function mostrarListaPagos() {
       const cumple = neto >= MONTO_MINIMO_CAMA;
       const sinAsiento = !idsConAsiento[id];
       const nombreLabel = nombresPorId[id] ? (" — " + nombresPorId[id]) : "";
+
+      // Costo real según su tipo de hospedaje (si ya eligió cama) + gastos grupales pendientes
+      const tipoCama = tipoCamaPorId[id];
+      const esSofaCama = tipoCama && tipoCama.indexOf("Sofá-cama") === 0;
+      const costoTotal = tipoCama ? (esSofaCama ? COSTO_SOFA_CAMA : COSTO_CAMA_NORMAL) : null;
+      const saldoGastos = saldoGastosGrupalesDe(id);
+      const costoTotalConGastos = costoTotal !== null ? (costoTotal + saldoGastos) : null;
+      const diferenciaCosto = costoTotalConGastos !== null ? (neto - costoTotalConGastos) : null;
+
       html += '<details style="margin-bottom:6px;padding:4px 8px;' + (sinAsiento ? 'border:1px dashed var(--danger);border-radius:8px;' : '') + '">';
       html += '<summary style="cursor:pointer;display:flex;justify-content:space-between;font-size:.85em;">' +
         '<span>' + (sinAsiento ? "❓" : (cumple ? "✅" : "⏳")) + ' ' + id + nombreLabel + '</span><span>$' + neto.toLocaleString() + ' neto / $' + MONTO_MINIMO_CAMA.toLocaleString() + '</span></summary>';
       if (totalDevuelto > 0) {
         html += '<p style="font-size:.75em;color:var(--muted);margin:4px 0;">Abonado: $' + totalAbonos.toLocaleString() + ' · Devuelto: $' + totalDevuelto.toLocaleString() + ' · <b>Neto: $' + neto.toLocaleString() + '</b></p>';
+      }
+      if (Math.abs(saldoGastos) > 0.01) {
+        html += '<p style="font-size:.75em;color:var(--muted);margin:4px 0;">🍽️ Gastos grupales: ' + (saldoGastos > 0 ? 'debe $' + saldoGastos.toFixed(2) : 'pagó $' + Math.abs(saldoGastos).toFixed(2) + ' de más en efectivo') + '.</p>';
+      }
+      if (diferenciaCosto === null) {
+        html += '<p style="font-size:.78em;color:var(--muted);margin:4px 0;">📌 Aún no elige cama — su costo total exacto ($' + COSTO_CAMA_NORMAL.toLocaleString() + ' cama / $' + COSTO_SOFA_CAMA.toLocaleString() + ' sofá-cama, más gastos grupales) se sabrá en cuanto elija.</p>';
+      } else if (diferenciaCosto > 0) {
+        html += '<p style="font-size:.85em;margin:4px 0;padding:4px 6px;background:#e8f8ee;border-radius:6px;">💸 <b>Se le debe devolver $' + diferenciaCosto.toLocaleString() + '</b> (costo total $' + costoTotalConGastos.toLocaleString() + ', ' + (esSofaCama ? "sofá-cama" : "cama") + ' + gastos grupales).</p>';
+      } else if (diferenciaCosto < 0) {
+        html += '<p style="font-size:.85em;margin:4px 0;padding:4px 6px;background:#fdeaea;border-radius:6px;">⚠️ <b>Le falta pagar $' + Math.abs(diferenciaCosto).toLocaleString() + '</b> (costo total $' + costoTotalConGastos.toLocaleString() + ', ' + (esSofaCama ? "sofá-cama" : "cama") + ' + gastos grupales).</p>';
+      } else {
+        html += '<p style="font-size:.85em;margin:4px 0;padding:4px 6px;background:#e8f8ee;border-radius:6px;">✅ Cubrió exactamente su costo total ($' + costoTotalConGastos.toLocaleString() + ') — no debe ni se le debe nada.</p>';
       }
       Object.keys(registros).forEach(function (key) {
         const r = registros[key];
