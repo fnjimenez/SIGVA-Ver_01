@@ -870,7 +870,7 @@ body{
 /* ============================================================
    CONFIGURACIÓN DEL VIAJE - editar aquí lo que cambie cada viaje
    ============================================================ */
-const SIGVA_VERSION = "v2026.08.27-r32"; // Actualizar este texto en cada entrega para poder identificar la versión en pantalla
+const SIGVA_VERSION = "v2026.08.27-r33"; // Actualizar este texto en cada entrega para poder identificar la versión en pantalla
 
 const TRIP_CONFIG = {
   fechaSalida: "2026-08-19T23:00:00-06:00", // Miércoles 19 de agosto, 11:00 PM hora de México (UTC-6)
@@ -2879,32 +2879,43 @@ function mostrarListaPagos() {
       html += '<details style="margin-bottom:6px;padding:4px 8px;' + (sinAsiento ? 'border:1px dashed var(--danger);border-radius:8px;' : '') + '">';
       html += '<summary style="cursor:pointer;display:flex;justify-content:space-between;font-size:.85em;">' +
         '<span>' + (sinAsiento ? "❓" : (cumple ? "✅" : "⏳")) + ' ' + id + nombreLabel + '</span><span>$' + neto.toLocaleString() + ' neto / $' + MONTO_MINIMO_CAMA.toLocaleString() + '</span></summary>';
-      if (totalDevuelto > 0) {
-        html += '<p style="font-size:.75em;color:var(--muted);margin:4px 0;">Abonado: $' + totalAbonos.toLocaleString() + ' · Devuelto: $' + totalDevuelto.toLocaleString() + ' · <b>Neto: $' + neto.toLocaleString() + '</b></p>';
-      }
-      if (Math.abs(saldoGastos) > 0.01) {
-        html += '<p style="font-size:.75em;color:var(--muted);margin:4px 0;">🍽️ Gastos grupales: ' + (saldoGastos > 0 ? 'debe $' + saldoGastos.toFixed(2) : 'pagó $' + Math.abs(saldoGastos).toFixed(2) + ' de más en efectivo') + '.</p>';
-      }
       if (diferenciaCosto === null) {
         html += '<p style="font-size:.78em;color:var(--muted);margin:4px 0;">📌 Aún no elige cama — su costo total exacto ($' + COSTO_CAMA_NORMAL.toLocaleString() + ' cama / $' + COSTO_SOFA_CAMA.toLocaleString() + ' sofá-cama, más gastos grupales) se sabrá en cuanto elija.</p>';
-      } else if (diferenciaCosto > 0) {
-        html += '<p style="font-size:.85em;margin:4px 0;padding:4px 6px;background:#e8f8ee;border-radius:6px;">💸 <b>Se le debe devolver $' + diferenciaCosto.toLocaleString() + '</b> (costo total $' + costoTotalConGastos.toLocaleString() + ', ' + (esSofaCama ? "sofá-cama" : "cama") + ' + gastos grupales).</p>';
-      } else if (diferenciaCosto < 0) {
-        html += '<p style="font-size:.85em;margin:4px 0;padding:4px 6px;background:#fdeaea;border-radius:6px;">⚠️ <b>Le falta pagar $' + Math.abs(diferenciaCosto).toLocaleString() + '</b> (costo total $' + costoTotalConGastos.toLocaleString() + ', ' + (esSofaCama ? "sofá-cama" : "cama") + ' + gastos grupales).</p>';
-      } else {
-        html += '<p style="font-size:.85em;margin:4px 0;padding:4px 6px;background:#e8f8ee;border-radius:6px;">✅ Cubrió exactamente su costo total ($' + costoTotalConGastos.toLocaleString() + ') — no debe ni se le debe nada.</p>';
       }
+
+      // Tabla consolidada: abonos, devoluciones, y cada gasto grupal (cuota/efectivo/saldo)
+      html += '<table style="width:100%;border-collapse:collapse;font-size:.78em;margin-top:6px;">';
+      html += '<thead><tr style="border-bottom:2px solid var(--border);text-align:left;">' +
+        '<th style="padding:4px;">Concepto</th><th style="padding:4px;">Fecha</th><th style="padding:4px;text-align:right;">Monto</th><th style="padding:4px;"></th></tr></thead><tbody>';
       Object.keys(registros).forEach(function (key) {
         const r = registros[key];
-        html += '<div class="participant-row" style="font-size:.8em;"><span>💰 ' + r.fecha + ' — $' + r.monto.toLocaleString() + '</span>' +
-          '<button class="btn danger" onclick="eliminarAbono(\'' + id + '\', \'' + key + '\')" style="width:auto;padding:3px 10px;">🗑️</button></div>';
+        html += '<tr style="border-bottom:1px solid var(--border);"><td style="padding:4px;">💰 Abono</td><td style="padding:4px;">' + r.fecha + '</td>' +
+          '<td style="padding:4px;text-align:right;color:var(--accent);">+$' + r.monto.toLocaleString() + '</td>' +
+          '<td style="padding:4px;text-align:right;"><button class="btn danger" onclick="eliminarAbono(\'' + id + '\', \'' + key + '\')" style="width:auto;padding:2px 8px;font-size:.9em;">🗑️</button></td></tr>';
       });
       Object.keys(devoluciones).forEach(function (key) {
         const d = devoluciones[key];
-        html += '<div class="participant-row" style="font-size:.8em;background:#fff4e5;border-radius:6px;padding:4px 6px;">' +
-          '<span>💸 ' + d.fecha + ' ' + (d.hora || '') + ' — $' + d.monto.toLocaleString() + ' → cuenta: ' + (d.cuenta || 'sin especificar') + '</span>' +
-          '<button class="btn danger" onclick="eliminarDevolucion(\'' + id + '\', \'' + key + '\')" style="width:auto;padding:3px 10px;">🗑️</button></div>';
+        html += '<tr style="border-bottom:1px solid var(--border);background:#fff4e5;"><td style="padding:4px;">💸 Devolución <span style="color:var(--muted);">(cuenta: ' + (d.cuenta || 's/e') + ')</span></td><td style="padding:4px;">' + d.fecha + ' ' + (d.hora || '') + '</td>' +
+          '<td style="padding:4px;text-align:right;color:var(--danger);">-$' + d.monto.toLocaleString() + '</td>' +
+          '<td style="padding:4px;text-align:right;"><button class="btn danger" onclick="eliminarDevolucion(\'' + id + '\', \'' + key + '\')" style="width:auto;padding:2px 8px;font-size:.9em;">🗑️</button></td></tr>';
       });
+      Object.keys(gastosGrupales).forEach(function (gKey) {
+        const g = gastosGrupales[gKey];
+        const cuota = g.monto / totalParticipantes;
+        const pagadoEfectivo = (g.efectivo && g.efectivo[id]) || 0;
+        html += '<tr style="border-bottom:1px solid var(--border);background:#f0f4ff;"><td style="padding:4px;">🍽️ ' + g.nombre + ' (cuota)</td><td style="padding:4px;">' + g.fecha + '</td>' +
+          '<td style="padding:4px;text-align:right;color:var(--danger);">-$' + cuota.toFixed(2) + '</td><td></td></tr>';
+        if (pagadoEfectivo > 0) {
+          html += '<tr style="border-bottom:1px solid var(--border);background:#f0fff4;"><td style="padding:4px;">🍽️ ' + g.nombre + ' (pagó en efectivo)</td><td style="padding:4px;"></td>' +
+            '<td style="padding:4px;text-align:right;color:var(--accent);">+$' + pagadoEfectivo.toLocaleString() + '</td><td></td></tr>';
+        }
+      });
+      html += '<tr style="font-weight:700;border-top:2px solid var(--border);"><td style="padding:4px;" colspan="2">Total pagado (neto)</td><td style="padding:4px;text-align:right;">$' + neto.toLocaleString() + '</td><td></td></tr>';
+      if (costoTotalConGastos !== null) {
+        html += '<tr style="font-weight:700;"><td style="padding:4px;" colspan="2">Costo total a cubrir</td><td style="padding:4px;text-align:right;">$' + costoTotalConGastos.toFixed(2) + '</td><td></td></tr>';
+        html += '<tr style="font-weight:700;background:' + (diferenciaCosto >= 0 ? '#e8f8ee' : '#fdeaea') + ';"><td style="padding:4px;" colspan="2">' + (diferenciaCosto >= 0 ? "Se le debe devolver" : "Le falta pagar") + '</td><td style="padding:4px;text-align:right;">$' + Math.abs(diferenciaCosto).toFixed(2) + '</td><td></td></tr>';
+      }
+      html += '</tbody></table>';
       html += '</details>';
     });
     box.innerHTML = html;
