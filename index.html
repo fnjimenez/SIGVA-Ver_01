@@ -822,10 +822,25 @@ body{
 
       <div style="margin-top:18px;padding-top:14px;border-top:2px dashed var(--primary);">
         <label style="font-weight:700;display:block;margin-bottom:6px;">📋 Desglose de Costos por Concepto</label>
-        <p style="font-size:.78em;color:var(--muted);margin-bottom:8px;">Captura cuánto cuesta cada concepto. Esto es lo que ven los alumnos (y tú en Pagos) en "¿Qué incluye este costo?". La suma debería dar $1,910 (cama) o $1,770 (sofá-cama).</p>
-        <div id="desgloseCostoCamposBox"></div>
-        <button class="btn success" id="guardarDesgloseCostoBtn" style="margin-top:6px;">✅ Guardar Desglose</button>
-        <p id="sumaDesgloseCostoTxt" style="font-size:.8em;font-weight:700;margin-top:8px;"></p>
+        <p style="font-size:.78em;color:var(--muted);margin-bottom:8px;">Estos son los conceptos que ven los alumnos en "¿Qué incluye este costo?". Agrega/edita/borra los que apliquen para ESTE viaje — no están fijos en el sistema, así que puedes reutilizarlo para cualquier viaje futuro con actividades distintas.</p>
+
+        <div id="listaConceptosCostoBox" style="margin-bottom:12px;"></div>
+        <p id="sumaDesgloseCostoTxt" style="font-size:.8em;font-weight:700;margin-bottom:10px;"></p>
+
+        <label style="font-weight:700;font-size:.85em;display:block;margin-bottom:4px;">➕ Agregar nuevo concepto</label>
+        <input type="text" id="nuevoConceptoNombre" placeholder="Ej. 🐢 Visita a Laguna Verde" style="width:100%;padding:8px;margin-bottom:6px;border-radius:8px;border:1px solid #ccc;">
+        <label class="req-check" style="font-size:.8em;"><input type="checkbox" id="nuevoConceptoVaria"> Su costo varía según el tipo de hospedaje (ej. cama vs. sofá-cama)</label>
+        <div id="nuevoConceptoMontoUnico">
+          <label style="font-size:.8em;">Monto (MXN)</label>
+          <input type="number" step="0.01" id="nuevoConceptoMonto" style="width:100%;padding:8px;margin-bottom:6px;border-radius:8px;border:1px solid #ccc;">
+        </div>
+        <div id="nuevoConceptoMontoDoble" style="display:none;">
+          <label style="font-size:.8em;">Monto para "cama" (MXN)</label>
+          <input type="number" step="0.01" id="nuevoConceptoMontoCama" style="width:100%;padding:8px;margin-bottom:6px;border-radius:8px;border:1px solid #ccc;">
+          <label style="font-size:.8em;">Monto para "sofá-cama" (MXN)</label>
+          <input type="number" step="0.01" id="nuevoConceptoMontoSofa" style="width:100%;padding:8px;margin-bottom:6px;border-radius:8px;border:1px solid #ccc;">
+        </div>
+        <button class="btn success" id="agregarConceptoCostoBtn">✅ Agregar Concepto</button>
       </div>
 
       <div style="margin-top:18px;padding-top:14px;border-top:2px dashed var(--danger);">
@@ -885,7 +900,7 @@ body{
 /* ============================================================
    CONFIGURACIÓN DEL VIAJE - editar aquí lo que cambie cada viaje
    ============================================================ */
-const SIGVA_VERSION = "v2026.08.29-r36"; // Actualizar este texto en cada entrega para poder identificar la versión en pantalla
+const SIGVA_VERSION = "v2026.08.29-r37"; // Actualizar este texto en cada entrega para poder identificar la versión en pantalla
 
 const TRIP_CONFIG = {
   fechaSalida: "2026-08-19T23:00:00-06:00", // Miércoles 19 de agosto, 11:00 PM hora de México (UTC-6)
@@ -1927,8 +1942,11 @@ document.addEventListener("DOMContentLoaded", function () {
   document.getElementById("guardarDevolucionBtn").addEventListener("click", guardarDevolucion);
   document.getElementById("guardarGastoGrupalBtn").addEventListener("click", guardarGastoGrupal);
   document.getElementById("limpiarPagoBtn").addEventListener("click", limpiarPagoPorId);
-  document.getElementById("guardarDesgloseCostoBtn").addEventListener("click", guardarDesgloseCosto);
-  dibujarCamposDesgloseCosto();
+  document.getElementById("agregarConceptoCostoBtn").addEventListener("click", agregarConceptoCosto);
+  document.getElementById("nuevoConceptoVaria").addEventListener("change", function () {
+    document.getElementById("nuevoConceptoMontoUnico").style.display = this.checked ? "none" : "block";
+    document.getElementById("nuevoConceptoMontoDoble").style.display = this.checked ? "block" : "none";
+  });
   document.getElementById("asignarCamaBtn").addEventListener("click", asignarCamaDirecta);
   document.getElementById("asignarAsientoBtn").addEventListener("click", asignarAsientoDirecta);
   document.getElementById("resetPasswordBtn").addEventListener("click", resetearContraseña);
@@ -2229,29 +2247,18 @@ const MONTO_MINIMO_CAMA = 2000;
 const COSTO_CAMA_NORMAL = 1910; // costo total del viaje para quien se queda en cama (Matrimonial/King/Queen)
 const COSTO_SOFA_CAMA = 1770;   // costo total del viaje para quien se queda en sofá-cama
 
-const CONCEPTOS_COSTO_VIAJE = [
-  { key: "transporte", label: "🚌 Transporte" },
-  { key: "hospedaje", label: "🏠 Hospedaje en casa completa tipo Airbnb" },
-  { key: "aquarium", label: "🐠 Acceso al Aquarium (tarifa de adulto mayor)" },
-  { key: "campamento", label: "⛺ Campamento (casa de campaña propia, uso de baños/regaderas, asadores, áreas verdes y playa)" },
-  { key: "tortuga", label: "🐢 Liberación de tortuga — donativo a Vida Milenaria A.C., incluye kit de taza o gorra (NO tiene costo aparte)" },
-  { key: "corona", label: "🧼 Visita a Fábrica de Jabón La Corona — incluye un refrigerio a su llegada" },
-  { key: "museo", label: "🏛️ Visita al Museo de Vestigios Arqueológicos de Ecatepec" },
-  { key: "planetario", label: "🔭 Proyección \"NASA — Los hijos del dios del viento\" en el Domo Digital 8K del Planetario Ehécatl" },
-  { key: "tajin", label: "🗿 Visita y recorrido guiado en la Zona de Monumentos Arqueológicos de El Tajín (convenio INAH)" }
-];
-
-function renderConceptosConMontos(desglose, esSofaCama) {
-  // Si no hay desglose capturado todavía, se muestran los conceptos sin monto (como antes).
+function renderConceptosConMontos(conceptos, esSofaCama) {
+  // 'conceptos' viene de Firebase (config/conceptosCosto) — 100% editable por el
+  // admin desde el sistema, ya NO es una lista fija en el código.
+  if (!conceptos || !Object.keys(conceptos).length) {
+    return '<li style="padding:2px 0;color:var(--muted);">Aún no se ha capturado el desglose de costos para este viaje.</li>';
+  }
   let html = "";
-  CONCEPTOS_COSTO_VIAJE.forEach(function (c) {
-    let monto = null;
-    if (desglose) {
-      if (c.key === "hospedaje") monto = esSofaCama ? desglose.hospedaje_sofa : desglose.hospedaje_cama;
-      else monto = desglose[c.key];
-    }
+  Object.values(conceptos).forEach(function (c) {
+    let monto = c.monto;
+    if (c.variaPorTipo) monto = esSofaCama ? c.monto_sofa : c.monto_cama;
     const montoTxt = (monto !== null && monto !== undefined && monto !== "") ? ' — <b>$' + Number(monto).toLocaleString() + '</b>' : "";
-    html += '<li style="padding:2px 0;">' + c.label + montoTxt + '</li>';
+    html += '<li style="padding:2px 0;">' + c.nombre + montoTxt + '</li>';
   });
   return html;
 }
@@ -2263,7 +2270,7 @@ function revelarPestanaPagos() {
   document.getElementById("pagosContenido").style.display = "block";
   mostrarListaPagos();
   mostrarGastosGrupales();
-  cargarDesgloseCosto();
+  mostrarEditorConceptosCosto();
 }
 
 function agregarAbono() {
@@ -2338,77 +2345,76 @@ function eliminarDevolucion(id, registroKey) {
 }
 
 /* ============================================================
-   DESGLOSE DE COSTOS POR CONCEPTO (captura manual del admin)
+   DESGLOSE DE COSTOS POR CONCEPTO (100% editable — el admin
+   agrega/edita/borra conceptos según lo que aplique a CADA viaje,
+   nada queda fijo en el código para poder reutilizar el sistema)
    ============================================================ */
-function dibujarCamposDesgloseCosto() {
-  const box = document.getElementById("desgloseCostoCamposBox");
-  if (!box) return;
-  let html = "";
-  CONCEPTOS_COSTO_VIAJE.forEach(function (c) {
-    if (c.key === "hospedaje") {
-      html += '<label style="font-size:.8em;">' + c.label + ' (cama)</label>';
-      html += '<input type="number" step="0.01" id="desglose_hospedaje_cama" style="width:100%;padding:8px;margin-bottom:4px;border-radius:8px;border:1px solid #ccc;">';
-      html += '<label style="font-size:.8em;">' + c.label + ' (sofá-cama)</label>';
-      html += '<input type="number" step="0.01" id="desglose_hospedaje_sofa" style="width:100%;padding:8px;margin-bottom:8px;border-radius:8px;border:1px solid #ccc;">';
-    } else {
-      html += '<label style="font-size:.8em;">' + c.label + '</label>';
-      html += '<input type="number" step="0.01" id="desglose_' + c.key + '" style="width:100%;padding:8px;margin-bottom:8px;border-radius:8px;border:1px solid #ccc;">';
-    }
-  });
-  box.innerHTML = html;
-  box.addEventListener("input", actualizarSumaDesglose);
-}
-
-function cargarDesgloseCosto() {
-  if (!database) return;
-  database.ref(TRIP_CONFIG.firebaseRoot + "/config/desgloseCosto").once("value").then(function (snap) {
-    const d = snap.val() || {};
-    CONCEPTOS_COSTO_VIAJE.forEach(function (c) {
-      if (c.key === "hospedaje") {
-        const elCama = document.getElementById("desglose_hospedaje_cama");
-        const elSofa = document.getElementById("desglose_hospedaje_sofa");
-        if (elCama) elCama.value = (d.hospedaje_cama != null) ? d.hospedaje_cama : "";
-        if (elSofa) elSofa.value = (d.hospedaje_sofa != null) ? d.hospedaje_sofa : "";
-      } else {
-        const el = document.getElementById("desglose_" + c.key);
-        if (el) el.value = (d[c.key] != null) ? d[c.key] : "";
-      }
-    });
-    actualizarSumaDesglose();
-  });
-}
-
-function actualizarSumaDesglose() {
+function mostrarEditorConceptosCosto() {
+  const box = document.getElementById("listaConceptosCostoBox");
   const txt = document.getElementById("sumaDesgloseCostoTxt");
-  if (!txt) return;
-  let sumaCama = 0, sumaSofa = 0;
-  CONCEPTOS_COSTO_VIAJE.forEach(function (c) {
-    if (c.key === "hospedaje") {
-      sumaCama += parseFloat(document.getElementById("desglose_hospedaje_cama").value) || 0;
-      sumaSofa += parseFloat(document.getElementById("desglose_hospedaje_sofa").value) || 0;
-    } else {
-      const v = parseFloat(document.getElementById("desglose_" + c.key).value) || 0;
-      sumaCama += v; sumaSofa += v;
+  if (!box || !database) return;
+  database.ref(TRIP_CONFIG.firebaseRoot + "/config/conceptosCosto").once("value").then(function (snap) {
+    const data = snap.val() || {};
+    const keys = Object.keys(data);
+    let sumaCama = 0, sumaSofa = 0;
+    let html = "";
+    if (!keys.length) {
+      html = '<p style="color:#999;font-size:.85em;">Aún no hay conceptos capturados para este viaje.</p>';
+    }
+    keys.forEach(function (key) {
+      const c = data[key];
+      let montoTxt;
+      if (c.variaPorTipo) {
+        const mc = Number(c.monto_cama) || 0, ms = Number(c.monto_sofa) || 0;
+        montoTxt = "$" + mc.toLocaleString() + " cama / $" + ms.toLocaleString() + " sofá-cama";
+        sumaCama += mc; sumaSofa += ms;
+      } else {
+        const m = Number(c.monto) || 0;
+        montoTxt = "$" + m.toLocaleString();
+        sumaCama += m; sumaSofa += m;
+      }
+      html += '<div class="participant-row" style="font-size:.85em;"><span>' + c.nombre + '</span>' +
+        '<span>' + montoTxt + ' <button class="btn danger" style="width:auto;padding:2px 8px;margin-left:6px;" onclick="eliminarConceptoCosto(\'' + escJs(key) + '\')">🗑️</button></span></div>';
+    });
+    box.innerHTML = html;
+    if (txt) {
+      txt.textContent = keys.length ? ("Suma actual: $" + sumaCama.toLocaleString() + " (cama) · $" + sumaSofa.toLocaleString() + " (sofá-cama).") : "";
     }
   });
-  const ok = Math.abs(sumaCama - COSTO_CAMA_NORMAL) < 0.5 && Math.abs(sumaSofa - COSTO_SOFA_CAMA) < 0.5;
-  txt.textContent = "Suma actual: $" + sumaCama.toFixed(2) + " (cama) · $" + sumaSofa.toFixed(2) + " (sofá-cama). Meta: $" + COSTO_CAMA_NORMAL.toLocaleString() + " / $" + COSTO_SOFA_CAMA.toLocaleString() + ".";
-  txt.style.color = ok ? "var(--accent)" : "var(--danger)";
 }
 
-function guardarDesgloseCosto() {
+function agregarConceptoCosto() {
   if (!isAdmin && !esCoordinador) { showToast("Solo Admin/Coordinadores pueden hacer esto"); return; }
-  const d = {};
-  CONCEPTOS_COSTO_VIAJE.forEach(function (c) {
-    if (c.key === "hospedaje") {
-      d.hospedaje_cama = parseFloat(document.getElementById("desglose_hospedaje_cama").value) || 0;
-      d.hospedaje_sofa = parseFloat(document.getElementById("desglose_hospedaje_sofa").value) || 0;
-    } else {
-      d[c.key] = parseFloat(document.getElementById("desglose_" + c.key).value) || 0;
-    }
+  const nombre = document.getElementById("nuevoConceptoNombre").value.trim();
+  const varia = document.getElementById("nuevoConceptoVaria").checked;
+  if (!nombre) { showToast("Escribe el nombre del concepto"); return; }
+  const item = { nombre: nombre, variaPorTipo: varia };
+  if (varia) {
+    item.monto_cama = parseFloat(document.getElementById("nuevoConceptoMontoCama").value) || 0;
+    item.monto_sofa = parseFloat(document.getElementById("nuevoConceptoMontoSofa").value) || 0;
+  } else {
+    item.monto = parseFloat(document.getElementById("nuevoConceptoMonto").value) || 0;
+  }
+  database.ref(TRIP_CONFIG.firebaseRoot + "/config/conceptosCosto").push().set(item).then(function () {
+    showToast("✅ Concepto \"" + nombre + "\" agregado");
+    document.getElementById("nuevoConceptoNombre").value = "";
+    document.getElementById("nuevoConceptoMonto").value = "";
+    document.getElementById("nuevoConceptoMontoCama").value = "";
+    document.getElementById("nuevoConceptoMontoSofa").value = "";
+    document.getElementById("nuevoConceptoVaria").checked = false;
+    document.getElementById("nuevoConceptoMontoUnico").style.display = "block";
+    document.getElementById("nuevoConceptoMontoDoble").style.display = "none";
+    mostrarEditorConceptosCosto();
+    mostrarListaPagos();
   });
-  database.ref(TRIP_CONFIG.firebaseRoot + "/config/desgloseCosto").set(d).then(function () {
-    showToast("✅ Desglose de costos guardado");
+}
+
+function eliminarConceptoCosto(key) {
+  if (!isAdmin && !esCoordinador) { showToast("Solo Admin/Coordinadores pueden hacer esto"); return; }
+  if (!confirm("¿Eliminar este concepto del desglose? No se puede deshacer.")) return;
+  database.ref(TRIP_CONFIG.firebaseRoot + "/config/conceptosCosto/" + key).remove().then(function () {
+    showToast("Concepto eliminado");
+    mostrarEditorConceptosCosto();
     mostrarListaPagos();
   });
 }
@@ -2903,7 +2909,7 @@ function mostrarListaPagos() {
     database.ref(root + "/asientos").once("value"),
     database.ref(root + "/camas_hotel").once("value"),
     database.ref(root + "/gastos_grupales").once("value"),
-    database.ref(root + "/config/desgloseCosto").once("value")
+    database.ref(root + "/config/conceptosCosto").once("value")
   ]).then(function (snaps) {
     const data = snaps[0].val() || {};
     const devolData = snaps[1].val() || {};
@@ -3116,7 +3122,7 @@ function renderCamas() {
     database.ref(TRIP_CONFIG.firebaseRoot + "/camas_hotel").once("value"),
     database.ref(TRIP_CONFIG.firebaseRoot + "/pagos/" + idIdentidad() + "/registros").once("value"),
     database.ref(TRIP_CONFIG.firebaseRoot + "/devoluciones/" + idIdentidad() + "/registros").once("value"),
-    database.ref(TRIP_CONFIG.firebaseRoot + "/config/desgloseCosto").once("value")
+    database.ref(TRIP_CONFIG.firebaseRoot + "/config/conceptosCosto").once("value")
   ]).then(function (snaps) {
     const camas = snaps[0].val() || {};
     const misRegistros = snaps[1].val();
