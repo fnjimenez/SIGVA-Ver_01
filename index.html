@@ -877,7 +877,7 @@ body{
 /* ============================================================
    CONFIGURACIÓN DEL VIAJE - editar aquí lo que cambie cada viaje
    ============================================================ */
-const SIGVA_VERSION = "v2026.08.29-r34"; // Actualizar este texto en cada entrega para poder identificar la versión en pantalla
+const SIGVA_VERSION = "v2026.08.29-r35"; // Actualizar este texto en cada entrega para poder identificar la versión en pantalla
 
 const TRIP_CONFIG = {
   fechaSalida: "2026-08-19T23:00:00-06:00", // Miércoles 19 de agosto, 11:00 PM hora de México (UTC-6)
@@ -2935,7 +2935,15 @@ function mostrarListaPagos() {
       });
       html += '<tr style="font-weight:700;border-top:2px solid var(--border);"><td style="padding:4px;" colspan="2">Total pagado (neto)</td><td style="padding:4px;text-align:right;">$' + neto.toLocaleString() + '</td><td></td></tr>';
       if (costoTotalConGastos !== null) {
-        html += '<tr style="font-weight:700;"><td style="padding:4px;" colspan="2">Costo total a cubrir</td><td style="padding:4px;text-align:right;">$' + costoTotalConGastos.toFixed(2) + '</td><td></td></tr>';
+        html += '<tr style="font-weight:700;"><td style="padding:4px;" colspan="2">Costo total a cubrir (' + (esSofaCama ? "sofá-cama" : "cama") + (Math.abs(saldoGastos) > 0.01 ? " + gastos grupales" : "") + ')</td><td style="padding:4px;text-align:right;">$' + costoTotalConGastos.toFixed(2) + '</td><td></td></tr>';
+        html += '<tr><td colspan="3" style="padding:0;">';
+        html += '<details style="padding:4px 8px;"><summary style="cursor:pointer;font-size:.85em;color:var(--primary);">📋 Ver qué incluye este costo</summary>';
+        html += '<ul style="margin:6px 0 2px 0;font-size:.85em;">';
+        INCLUYE_COSTO_VIAJE.forEach(function (item) { html += '<li style="padding:2px 0;">' + item + '</li>'; });
+        if (Math.abs(saldoGastos) > 0.01) {
+          html += '<li style="padding:2px 0;">🍽️ Gastos grupales (comida, etc.): $' + saldoGastos.toFixed(2) + ' (ver detalle arriba en la tabla)</li>';
+        }
+        html += '</ul></details></td></tr>';
         html += '<tr style="font-weight:700;background:' + (diferenciaCosto >= 0 ? '#e8f8ee' : '#fdeaea') + ';"><td style="padding:4px;" colspan="2">' + (diferenciaCosto >= 0 ? "Se le debe devolver" : "Le falta pagar") + '</td><td style="padding:4px;text-align:right;">$' + Math.abs(diferenciaCosto).toFixed(2) + '</td><td></td></tr>';
       }
       html += '</tbody></table>';
