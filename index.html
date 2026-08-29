@@ -820,6 +820,14 @@ body{
         <div id="listaGastosGrupalesBox" style="margin-top:12px;"></div>
       </div>
 
+      <div style="margin-top:18px;padding-top:14px;border-top:2px dashed var(--primary);">
+        <label style="font-weight:700;display:block;margin-bottom:6px;">📋 Desglose de Costos por Concepto</label>
+        <p style="font-size:.78em;color:var(--muted);margin-bottom:8px;">Captura cuánto cuesta cada concepto. Esto es lo que ven los alumnos (y tú en Pagos) en "¿Qué incluye este costo?". La suma debería dar $1,910 (cama) o $1,770 (sofá-cama).</p>
+        <div id="desgloseCostoCamposBox"></div>
+        <button class="btn success" id="guardarDesgloseCostoBtn" style="margin-top:6px;">✅ Guardar Desglose</button>
+        <p id="sumaDesgloseCostoTxt" style="font-size:.8em;font-weight:700;margin-top:8px;"></p>
+      </div>
+
       <div style="margin-top:18px;padding-top:14px;border-top:2px dashed var(--danger);">
         <label style="font-weight:700;display:block;margin-bottom:6px;">🧹 Eliminar Registro de Pago por ID (limpieza)</label>
         <p style="font-size:.78em;color:var(--muted);margin-bottom:8px;">Úsalo cuando un registro no se pueda borrar con su botón normal (ej. si la matrícula se capturó con un carácter raro como un apóstrofe). Copia el ID EXACTO tal como aparece en la lista de abajo.</p>
@@ -877,7 +885,7 @@ body{
 /* ============================================================
    CONFIGURACIÓN DEL VIAJE - editar aquí lo que cambie cada viaje
    ============================================================ */
-const SIGVA_VERSION = "v2026.08.29-r35"; // Actualizar este texto en cada entrega para poder identificar la versión en pantalla
+const SIGVA_VERSION = "v2026.08.29-r36"; // Actualizar este texto en cada entrega para poder identificar la versión en pantalla
 
 const TRIP_CONFIG = {
   fechaSalida: "2026-08-19T23:00:00-06:00", // Miércoles 19 de agosto, 11:00 PM hora de México (UTC-6)
@@ -1919,6 +1927,8 @@ document.addEventListener("DOMContentLoaded", function () {
   document.getElementById("guardarDevolucionBtn").addEventListener("click", guardarDevolucion);
   document.getElementById("guardarGastoGrupalBtn").addEventListener("click", guardarGastoGrupal);
   document.getElementById("limpiarPagoBtn").addEventListener("click", limpiarPagoPorId);
+  document.getElementById("guardarDesgloseCostoBtn").addEventListener("click", guardarDesgloseCosto);
+  dibujarCamposDesgloseCosto();
   document.getElementById("asignarCamaBtn").addEventListener("click", asignarCamaDirecta);
   document.getElementById("asignarAsientoBtn").addEventListener("click", asignarAsientoDirecta);
   document.getElementById("resetPasswordBtn").addEventListener("click", resetearContraseña);
@@ -2219,17 +2229,32 @@ const MONTO_MINIMO_CAMA = 2000;
 const COSTO_CAMA_NORMAL = 1910; // costo total del viaje para quien se queda en cama (Matrimonial/King/Queen)
 const COSTO_SOFA_CAMA = 1770;   // costo total del viaje para quien se queda en sofá-cama
 
-const INCLUYE_COSTO_VIAJE = [
-  "🚌 Transporte",
-  "🏠 Hospedaje en casa completa tipo Airbnb",
-  "🐠 Acceso al Aquarium (tarifa de adulto mayor)",
-  "⛺ Campamento (casa de campaña propia, uso de baños/regaderas, asadores, áreas verdes y playa)",
-  "🐢 Liberación de tortuga — donativo a Vida Milenaria A.C., incluye kit de taza o gorra (NO tiene costo aparte)",
-  "🧼 Visita a Fábrica de Jabón La Corona — incluye un refrigerio a su llegada",
-  "🏛️ Visita al Museo de Vestigios Arqueológicos de Ecatepec",
-  "🔭 Proyección \"NASA — Los hijos del dios del viento\" en el Domo Digital 8K del Planetario Ehécatl",
-  "🗿 Visita y recorrido guiado en la Zona de Monumentos Arqueológicos de El Tajín (convenio INAH)"
+const CONCEPTOS_COSTO_VIAJE = [
+  { key: "transporte", label: "🚌 Transporte" },
+  { key: "hospedaje", label: "🏠 Hospedaje en casa completa tipo Airbnb" },
+  { key: "aquarium", label: "🐠 Acceso al Aquarium (tarifa de adulto mayor)" },
+  { key: "campamento", label: "⛺ Campamento (casa de campaña propia, uso de baños/regaderas, asadores, áreas verdes y playa)" },
+  { key: "tortuga", label: "🐢 Liberación de tortuga — donativo a Vida Milenaria A.C., incluye kit de taza o gorra (NO tiene costo aparte)" },
+  { key: "corona", label: "🧼 Visita a Fábrica de Jabón La Corona — incluye un refrigerio a su llegada" },
+  { key: "museo", label: "🏛️ Visita al Museo de Vestigios Arqueológicos de Ecatepec" },
+  { key: "planetario", label: "🔭 Proyección \"NASA — Los hijos del dios del viento\" en el Domo Digital 8K del Planetario Ehécatl" },
+  { key: "tajin", label: "🗿 Visita y recorrido guiado en la Zona de Monumentos Arqueológicos de El Tajín (convenio INAH)" }
 ];
+
+function renderConceptosConMontos(desglose, esSofaCama) {
+  // Si no hay desglose capturado todavía, se muestran los conceptos sin monto (como antes).
+  let html = "";
+  CONCEPTOS_COSTO_VIAJE.forEach(function (c) {
+    let monto = null;
+    if (desglose) {
+      if (c.key === "hospedaje") monto = esSofaCama ? desglose.hospedaje_sofa : desglose.hospedaje_cama;
+      else monto = desglose[c.key];
+    }
+    const montoTxt = (monto !== null && monto !== undefined && monto !== "") ? ' — <b>$' + Number(monto).toLocaleString() + '</b>' : "";
+    html += '<li style="padding:2px 0;">' + c.label + montoTxt + '</li>';
+  });
+  return html;
+}
 
 
 function revelarPestanaPagos() {
@@ -2238,6 +2263,7 @@ function revelarPestanaPagos() {
   document.getElementById("pagosContenido").style.display = "block";
   mostrarListaPagos();
   mostrarGastosGrupales();
+  cargarDesgloseCosto();
 }
 
 function agregarAbono() {
@@ -2307,6 +2333,82 @@ function eliminarDevolucion(id, registroKey) {
   if (!confirm("¿Eliminar este registro de devolución? No se puede deshacer.")) return;
   database.ref(TRIP_CONFIG.firebaseRoot + "/devoluciones/" + id + "/registros/" + registroKey).remove().then(function () {
     showToast("Devolución eliminada");
+    mostrarListaPagos();
+  });
+}
+
+/* ============================================================
+   DESGLOSE DE COSTOS POR CONCEPTO (captura manual del admin)
+   ============================================================ */
+function dibujarCamposDesgloseCosto() {
+  const box = document.getElementById("desgloseCostoCamposBox");
+  if (!box) return;
+  let html = "";
+  CONCEPTOS_COSTO_VIAJE.forEach(function (c) {
+    if (c.key === "hospedaje") {
+      html += '<label style="font-size:.8em;">' + c.label + ' (cama)</label>';
+      html += '<input type="number" step="0.01" id="desglose_hospedaje_cama" style="width:100%;padding:8px;margin-bottom:4px;border-radius:8px;border:1px solid #ccc;">';
+      html += '<label style="font-size:.8em;">' + c.label + ' (sofá-cama)</label>';
+      html += '<input type="number" step="0.01" id="desglose_hospedaje_sofa" style="width:100%;padding:8px;margin-bottom:8px;border-radius:8px;border:1px solid #ccc;">';
+    } else {
+      html += '<label style="font-size:.8em;">' + c.label + '</label>';
+      html += '<input type="number" step="0.01" id="desglose_' + c.key + '" style="width:100%;padding:8px;margin-bottom:8px;border-radius:8px;border:1px solid #ccc;">';
+    }
+  });
+  box.innerHTML = html;
+  box.addEventListener("input", actualizarSumaDesglose);
+}
+
+function cargarDesgloseCosto() {
+  if (!database) return;
+  database.ref(TRIP_CONFIG.firebaseRoot + "/config/desgloseCosto").once("value").then(function (snap) {
+    const d = snap.val() || {};
+    CONCEPTOS_COSTO_VIAJE.forEach(function (c) {
+      if (c.key === "hospedaje") {
+        const elCama = document.getElementById("desglose_hospedaje_cama");
+        const elSofa = document.getElementById("desglose_hospedaje_sofa");
+        if (elCama) elCama.value = (d.hospedaje_cama != null) ? d.hospedaje_cama : "";
+        if (elSofa) elSofa.value = (d.hospedaje_sofa != null) ? d.hospedaje_sofa : "";
+      } else {
+        const el = document.getElementById("desglose_" + c.key);
+        if (el) el.value = (d[c.key] != null) ? d[c.key] : "";
+      }
+    });
+    actualizarSumaDesglose();
+  });
+}
+
+function actualizarSumaDesglose() {
+  const txt = document.getElementById("sumaDesgloseCostoTxt");
+  if (!txt) return;
+  let sumaCama = 0, sumaSofa = 0;
+  CONCEPTOS_COSTO_VIAJE.forEach(function (c) {
+    if (c.key === "hospedaje") {
+      sumaCama += parseFloat(document.getElementById("desglose_hospedaje_cama").value) || 0;
+      sumaSofa += parseFloat(document.getElementById("desglose_hospedaje_sofa").value) || 0;
+    } else {
+      const v = parseFloat(document.getElementById("desglose_" + c.key).value) || 0;
+      sumaCama += v; sumaSofa += v;
+    }
+  });
+  const ok = Math.abs(sumaCama - COSTO_CAMA_NORMAL) < 0.5 && Math.abs(sumaSofa - COSTO_SOFA_CAMA) < 0.5;
+  txt.textContent = "Suma actual: $" + sumaCama.toFixed(2) + " (cama) · $" + sumaSofa.toFixed(2) + " (sofá-cama). Meta: $" + COSTO_CAMA_NORMAL.toLocaleString() + " / $" + COSTO_SOFA_CAMA.toLocaleString() + ".";
+  txt.style.color = ok ? "var(--accent)" : "var(--danger)";
+}
+
+function guardarDesgloseCosto() {
+  if (!isAdmin && !esCoordinador) { showToast("Solo Admin/Coordinadores pueden hacer esto"); return; }
+  const d = {};
+  CONCEPTOS_COSTO_VIAJE.forEach(function (c) {
+    if (c.key === "hospedaje") {
+      d.hospedaje_cama = parseFloat(document.getElementById("desglose_hospedaje_cama").value) || 0;
+      d.hospedaje_sofa = parseFloat(document.getElementById("desglose_hospedaje_sofa").value) || 0;
+    } else {
+      d[c.key] = parseFloat(document.getElementById("desglose_" + c.key).value) || 0;
+    }
+  });
+  database.ref(TRIP_CONFIG.firebaseRoot + "/config/desgloseCosto").set(d).then(function () {
+    showToast("✅ Desglose de costos guardado");
     mostrarListaPagos();
   });
 }
@@ -2800,10 +2902,12 @@ function mostrarListaPagos() {
     database.ref(root + "/devoluciones").once("value"),
     database.ref(root + "/asientos").once("value"),
     database.ref(root + "/camas_hotel").once("value"),
-    database.ref(root + "/gastos_grupales").once("value")
+    database.ref(root + "/gastos_grupales").once("value"),
+    database.ref(root + "/config/desgloseCosto").once("value")
   ]).then(function (snaps) {
     const data = snaps[0].val() || {};
     const devolData = snaps[1].val() || {};
+    const desgloseCosto = snaps[5].val() || null;
     const asientos = snaps[2].val() || {};
     const camas = snaps[3].val() || {};
     const gastosGrupales = snaps[4].val() || {};
@@ -2939,7 +3043,7 @@ function mostrarListaPagos() {
         html += '<tr><td colspan="3" style="padding:0;">';
         html += '<details style="padding:4px 8px;"><summary style="cursor:pointer;font-size:.85em;color:var(--primary);">📋 Ver qué incluye este costo</summary>';
         html += '<ul style="margin:6px 0 2px 0;font-size:.85em;">';
-        INCLUYE_COSTO_VIAJE.forEach(function (item) { html += '<li style="padding:2px 0;">' + item + '</li>'; });
+        html += renderConceptosConMontos(desgloseCosto, esSofaCama);
         if (Math.abs(saldoGastos) > 0.01) {
           html += '<li style="padding:2px 0;">🍽️ Gastos grupales (comida, etc.): $' + saldoGastos.toFixed(2) + ' (ver detalle arriba en la tabla)</li>';
         }
@@ -3011,11 +3115,13 @@ function renderCamas() {
   Promise.all([
     database.ref(TRIP_CONFIG.firebaseRoot + "/camas_hotel").once("value"),
     database.ref(TRIP_CONFIG.firebaseRoot + "/pagos/" + idIdentidad() + "/registros").once("value"),
-    database.ref(TRIP_CONFIG.firebaseRoot + "/devoluciones/" + idIdentidad() + "/registros").once("value")
+    database.ref(TRIP_CONFIG.firebaseRoot + "/devoluciones/" + idIdentidad() + "/registros").once("value"),
+    database.ref(TRIP_CONFIG.firebaseRoot + "/config/desgloseCosto").once("value")
   ]).then(function (snaps) {
     const camas = snaps[0].val() || {};
     const misRegistros = snaps[1].val();
     const totalPagado = totalPagadoDe(misRegistros) - totalPagadoDe(snaps[2].val());
+    const desgloseCosto = snaps[3].val() || null;
 
     // Pre-escaneo: saber si el usuario ya tiene cama asignada y de qué tipo,
     // para poder calcular su costo total exacto (cama vs. sofá-cama).
@@ -3056,7 +3162,7 @@ function renderCamas() {
     }
     html += '<details style="margin-bottom:10px;"><summary style="cursor:pointer;font-size:.85em;font-weight:700;color:var(--primary);">📋 ¿Qué incluye tu pago?</summary>';
     html += '<ul style="margin-top:6px;font-size:.85em;">';
-    INCLUYE_COSTO_VIAJE.forEach(function (item) { html += '<li style="padding:3px 0;">' + item + '</li>'; });
+    html += renderConceptosConMontos(desgloseCosto, esSofaCama);
     html += '</ul></details>';
     html += '<div class="alert danger">🏠 <b>Es una casa tipo Airbnb, no un hotel</b> — hay que respetar las reglas de la casa. <b>Cualquier daño, multa o cargo extra que cobre el anfitrión por mal comportamiento se le cobrará directamente al responsable</b>, además de su costo del viaje.';
     html += '<details style="margin-top:8px;"><summary style="cursor:pointer;font-weight:700;">📋 Ver reglas y cargos adicionales exactos</summary>';
