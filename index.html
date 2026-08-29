@@ -820,6 +820,13 @@ body{
         <div id="listaGastosGrupalesBox" style="margin-top:12px;"></div>
       </div>
 
+      <div style="margin-top:18px;padding-top:14px;border-top:2px dashed var(--danger);">
+        <label style="font-weight:700;display:block;margin-bottom:6px;">🧹 Eliminar Registro de Pago por ID (limpieza)</label>
+        <p style="font-size:.78em;color:var(--muted);margin-bottom:8px;">Úsalo cuando un registro no se pueda borrar con su botón normal (ej. si la matrícula se capturó con un carácter raro como un apóstrofe). Copia el ID EXACTO tal como aparece en la lista de abajo.</p>
+        <input type="text" id="limpiarPagoIdInput" placeholder="Ej. U2403057N'103 (cópialo tal cual)" style="width:100%;padding:10px;margin-bottom:6px;border-radius:8px;border:1px solid #ccc;">
+        <button class="btn danger" id="limpiarPagoBtn">🗑️ Eliminar TODOS los abonos/devoluciones de este ID</button>
+      </div>
+
       <div id="listaPagosBox" style="margin-top:14px;"></div>
     </div>
   </div>
@@ -870,7 +877,7 @@ body{
 /* ============================================================
    CONFIGURACIÓN DEL VIAJE - editar aquí lo que cambie cada viaje
    ============================================================ */
-const SIGVA_VERSION = "v2026.08.27-r33"; // Actualizar este texto en cada entrega para poder identificar la versión en pantalla
+const SIGVA_VERSION = "v2026.08.29-r34"; // Actualizar este texto en cada entrega para poder identificar la versión en pantalla
 
 const TRIP_CONFIG = {
   fechaSalida: "2026-08-19T23:00:00-06:00", // Miércoles 19 de agosto, 11:00 PM hora de México (UTC-6)
@@ -1911,6 +1918,7 @@ document.addEventListener("DOMContentLoaded", function () {
   document.getElementById("guardarPagoBtn").addEventListener("click", agregarAbono);
   document.getElementById("guardarDevolucionBtn").addEventListener("click", guardarDevolucion);
   document.getElementById("guardarGastoGrupalBtn").addEventListener("click", guardarGastoGrupal);
+  document.getElementById("limpiarPagoBtn").addEventListener("click", limpiarPagoPorId);
   document.getElementById("asignarCamaBtn").addEventListener("click", asignarCamaDirecta);
   document.getElementById("asignarAsientoBtn").addEventListener("click", asignarAsientoDirecta);
   document.getElementById("resetPasswordBtn").addEventListener("click", resetearContraseña);
@@ -2299,6 +2307,21 @@ function eliminarDevolucion(id, registroKey) {
   if (!confirm("¿Eliminar este registro de devolución? No se puede deshacer.")) return;
   database.ref(TRIP_CONFIG.firebaseRoot + "/devoluciones/" + id + "/registros/" + registroKey).remove().then(function () {
     showToast("Devolución eliminada");
+    mostrarListaPagos();
+  });
+}
+
+function limpiarPagoPorId() {
+  if (!isAdmin && !esCoordinador) { showToast("Solo Admin/Coordinadores pueden hacer esto"); return; }
+  const id = document.getElementById("limpiarPagoIdInput").value; // SIN trim/uppercase: se borra tal cual se escribió, por si tiene un carácter raro
+  if (!id) { showToast("Escribe el ID exacto a eliminar"); return; }
+  if (!confirm("¿Eliminar TODOS los abonos y devoluciones registrados bajo el ID \"" + id + "\"? No se puede deshacer.")) return;
+  Promise.all([
+    database.ref(TRIP_CONFIG.firebaseRoot + "/pagos/" + id).remove(),
+    database.ref(TRIP_CONFIG.firebaseRoot + "/devoluciones/" + id).remove()
+  ]).then(function () {
+    showToast("✅ Registros de \"" + id + "\" eliminados");
+    document.getElementById("limpiarPagoIdInput").value = "";
     mostrarListaPagos();
   });
 }
@@ -2832,7 +2855,7 @@ function mostrarListaPagos() {
         const total = totalPagadoDe(data[id].registros);
         html += '<div class="participant-row" style="border:1px solid var(--danger);border-radius:8px;padding:6px 10px;margin-bottom:6px;">';
         html += '<span>🔑 <code>' + id + '</code> — $' + total.toLocaleString() + '</span>';
-        html += '<button class="btn warning" style="width:auto;padding:5px 10px;font-size:.8em;" onclick="reasignarAbonos(\'' + id + '\')">🔧 Reasignar</button>';
+        html += '<button class="btn warning" style="width:auto;padding:5px 10px;font-size:.8em;" onclick="reasignarAbonos(\'' + escJs(id) + '\')">🔧 Reasignar</button>';
         html += '</div>';
       });
     }
@@ -2891,13 +2914,13 @@ function mostrarListaPagos() {
         const r = registros[key];
         html += '<tr style="border-bottom:1px solid var(--border);"><td style="padding:4px;">💰 Abono</td><td style="padding:4px;">' + r.fecha + '</td>' +
           '<td style="padding:4px;text-align:right;color:var(--accent);">+$' + r.monto.toLocaleString() + '</td>' +
-          '<td style="padding:4px;text-align:right;"><button class="btn danger" onclick="eliminarAbono(\'' + id + '\', \'' + key + '\')" style="width:auto;padding:2px 8px;font-size:.9em;">🗑️</button></td></tr>';
+          '<td style="padding:4px;text-align:right;"><button class="btn danger" onclick="eliminarAbono(\'' + escJs(id) + '\', \'' + escJs(key) + '\')" style="width:auto;padding:2px 8px;font-size:.9em;">🗑️</button></td></tr>';
       });
       Object.keys(devoluciones).forEach(function (key) {
         const d = devoluciones[key];
         html += '<tr style="border-bottom:1px solid var(--border);background:#fff4e5;"><td style="padding:4px;">💸 Devolución <span style="color:var(--muted);">(cuenta: ' + (d.cuenta || 's/e') + ')</span></td><td style="padding:4px;">' + d.fecha + ' ' + (d.hora || '') + '</td>' +
           '<td style="padding:4px;text-align:right;color:var(--danger);">-$' + d.monto.toLocaleString() + '</td>' +
-          '<td style="padding:4px;text-align:right;"><button class="btn danger" onclick="eliminarDevolucion(\'' + id + '\', \'' + key + '\')" style="width:auto;padding:2px 8px;font-size:.9em;">🗑️</button></td></tr>';
+          '<td style="padding:4px;text-align:right;"><button class="btn danger" onclick="eliminarDevolucion(\'' + escJs(id) + '\', \'' + escJs(key) + '\')" style="width:auto;padding:2px 8px;font-size:.9em;">🗑️</button></td></tr>';
       });
       Object.keys(gastosGrupales).forEach(function (gKey) {
         const g = gastosGrupales[gKey];
@@ -2953,6 +2976,12 @@ function iconosOcupacion(ocupados, capacidad) {
   }
   html += '</span>';
   return html;
+}
+
+function escJs(str) {
+  // Escapa comillas/backslashes para que un id/matrícula con caracteres raros
+  // (ej. un apóstrofe capturado por error) no rompa los botones onclick="...".
+  return String(str).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
 function claveCamaLayout(hab, cama) { return "h" + hab + "_c" + cama; }
@@ -4065,7 +4094,7 @@ function renderParticipantes(asientosData) {
       sinAsiento.forEach(function (uid) {
         const idVisible = (isAdmin || esCoordinador) ? ' <code style="font-size:.72em;color:var(--muted);">[' + uid + ']</code>' : '';
         const botonReasignar = (isAdmin || esCoordinador)
-          ? '<button class="btn warning" style="width:auto;padding:4px 10px;font-size:.78em;margin-left:8px;" onclick="reasignarHospedaje(\'' + uid + '\')">🔧 Reasignar</button>'
+          ? '<button class="btn warning" style="width:auto;padding:4px 10px;font-size:.78em;margin-left:8px;" onclick="reasignarHospedaje(\'' + escJs(uid) + '\')">🔧 Reasignar</button>'
           : '';
         html += '<div class="participant-row"><span>' + (nombresPorId[uid] || uid) + idVisible + '</span><span style="font-size:.85em;">' + hospedajeMap[uid] + botonReasignar + '</span></div>';
       });
