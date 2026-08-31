@@ -820,6 +820,13 @@ body{
         <div id="listaGastosGrupalesBox" style="margin-top:12px;"></div>
       </div>
 
+      <div style="margin-top:18px;padding-top:14px;border-top:2px dashed var(--warning);">
+        <label style="font-weight:700;display:block;margin-bottom:6px;">🔒 Monto Mínimo para Elegir Cama</label>
+        <p style="font-size:.78em;color:var(--muted);margin-bottom:8px;">Déjalo en $0 para QUITAR la restricción (cualquiera puede elegir cama sin haber abonado nada) — útil mientras aún no arrancan los cobros. Súbelo cuando quieras exigir un anticipo mínimo.</p>
+        <input type="number" id="montoMinimoCamaInput" placeholder="0" min="0" style="width:100%;padding:10px;margin-bottom:6px;border-radius:8px;border:1px solid #ccc;">
+        <button class="btn warning" id="guardarMontoMinimoCamaBtn">✅ Guardar Monto Mínimo</button>
+      </div>
+
       <div style="margin-top:18px;padding-top:14px;border-top:2px dashed var(--primary);">
         <label style="font-weight:700;display:block;margin-bottom:6px;">📋 Desglose de Costos por Concepto</label>
         <p style="font-size:.78em;color:var(--muted);margin-bottom:8px;">Estos son los conceptos que ven los alumnos en "¿Qué incluye este costo?". Agrega/edita/borra los que apliquen para ESTE viaje — no están fijos en el sistema, así que puedes reutilizarlo para cualquier viaje futuro con actividades distintas.</p>
@@ -835,10 +842,7 @@ body{
           <input type="number" step="0.01" id="nuevoConceptoMonto" style="width:100%;padding:8px;margin-bottom:6px;border-radius:8px;border:1px solid #ccc;">
         </div>
         <div id="nuevoConceptoMontoDoble" style="display:none;">
-          <label style="font-size:.8em;">Monto para "cama" (MXN)</label>
-          <input type="number" step="0.01" id="nuevoConceptoMontoCama" style="width:100%;padding:8px;margin-bottom:6px;border-radius:8px;border:1px solid #ccc;">
-          <label style="font-size:.8em;">Monto para "sofá-cama" (MXN)</label>
-          <input type="number" step="0.01" id="nuevoConceptoMontoSofa" style="width:100%;padding:8px;margin-bottom:6px;border-radius:8px;border:1px solid #ccc;">
+          <!-- Los campos aquí se generan dinámicamente según las categorías reales del hotel (cama, sofá-cama, colchoneta, etc.) -->
         </div>
         <button class="btn success" id="agregarConceptoCostoBtn">✅ Agregar Concepto</button>
       </div>
@@ -900,7 +904,7 @@ body{
 /* ============================================================
    CONFIGURACIÓN DEL VIAJE - editar aquí lo que cambie cada viaje
    ============================================================ */
-const SIGVA_VERSION = "v2026.08.29-r37"; // Actualizar este texto en cada entrega para poder identificar la versión en pantalla
+const SIGVA_VERSION = "v2026.08.31-r40"; // Actualizar este texto en cada entrega para poder identificar la versión en pantalla
 
 const TRIP_CONFIG = {
   fechaSalida: "2026-08-19T23:00:00-06:00", // Miércoles 19 de agosto, 11:00 PM hora de México (UTC-6)
@@ -992,6 +996,7 @@ function initFirebase() {
   escucharHospedaje();
   intentarSesionAutomatica();
   escucharOnline();
+  cargarMontoMinimoCama();
 }
 
 /* ============================================================
@@ -1943,9 +1948,11 @@ document.addEventListener("DOMContentLoaded", function () {
   document.getElementById("guardarGastoGrupalBtn").addEventListener("click", guardarGastoGrupal);
   document.getElementById("limpiarPagoBtn").addEventListener("click", limpiarPagoPorId);
   document.getElementById("agregarConceptoCostoBtn").addEventListener("click", agregarConceptoCosto);
+  document.getElementById("guardarMontoMinimoCamaBtn").addEventListener("click", guardarMontoMinimoCama);
   document.getElementById("nuevoConceptoVaria").addEventListener("change", function () {
     document.getElementById("nuevoConceptoMontoUnico").style.display = this.checked ? "none" : "block";
     document.getElementById("nuevoConceptoMontoDoble").style.display = this.checked ? "block" : "none";
+    if (this.checked) dibujarCamposCategoriasHospedaje();
   });
   document.getElementById("asignarCamaBtn").addEventListener("click", asignarCamaDirecta);
   document.getElementById("asignarAsientoBtn").addEventListener("click", asignarAsientoDirecta);
@@ -2243,11 +2250,72 @@ function limpiarParesViejos() {
    Un alumno solo puede elegir/jalar cama si aquí existe su
    fecha de pago completo, capturada por un coordinador.
    ============================================================ */
-const MONTO_MINIMO_CAMA = 2000;
+let MONTO_MINIMO_CAMA = 0; // configurable desde el sistema (Pagos) — 0 = sin restricción
 const COSTO_CAMA_NORMAL = 1910; // costo total del viaje para quien se queda en cama (Matrimonial/King/Queen)
 const COSTO_SOFA_CAMA = 1770;   // costo total del viaje para quien se queda en sofá-cama
 
-function renderConceptosConMontos(conceptos, esSofaCama) {
+function cargarMontoMinimoCama(callback) {
+  if (!database) { if (callback) callback(); return; }
+  database.ref(TRIP_CONFIG.firebaseRoot + "/config/montoMinimoCama").once("value").then(function (snap) {
+    MONTO_MINIMO_CAMA = (snap.val() !== null && snap.val() !== undefined) ? Number(snap.val()) : 0;
+    const input = document.getElementById("montoMinimoCamaInput");
+    if (input) input.value = MONTO_MINIMO_CAMA;
+    if (callback) callback();
+  });
+}
+
+function guardarMontoMinimoCama() {
+  if (!isAdmin && !esCoordinador) { showToast("Solo Admin/Coordinadores pueden hacer esto"); return; }
+  const valor = parseFloat(document.getElementById("montoMinimoCamaInput").value);
+  const monto = (isNaN(valor) || valor < 0) ? 0 : valor;
+  database.ref(TRIP_CONFIG.firebaseRoot + "/config/montoMinimoCama").set(monto).then(function () {
+    MONTO_MINIMO_CAMA = monto;
+    showToast(monto === 0 ? "✅ Restricción de monto mínimo QUITADA — cualquiera puede elegir cama" : "✅ Monto mínimo actualizado a $" + monto.toLocaleString());
+    mostrarListaPagos();
+    if (typeof renderCamas === "function") renderCamas();
+  });
+}
+
+const LABELS_CATEGORIA_HOSPEDAJE = {
+  cama: "🛏️ Cama (Matrimonial/King/Queen)",
+  sofa: "🛋️ Sofá-cama",
+  colchoneta: "🛌 Colchoneta",
+  inflable: "💨 Colchón inflable"
+};
+
+function categoriaCama(tipo) {
+  // Clasifica CUALQUIER texto de "tipo" de cama (incluido lo que el admin
+  // escriba a mano en el editor de layout) en una categoría de costo.
+  // Si mañana agregan un tipo nuevo (ej. "Litera"), cae en "cama" por
+  // default — no hace falta tocar código, solo el editor de layout.
+  if (!tipo) return "cama";
+  const t = tipo.toLowerCase();
+  if (t.indexOf("sofá") !== -1 || t.indexOf("sofa") !== -1) return "sofa";
+  if (t.indexOf("colchoneta") !== -1) return "colchoneta";
+  if (t.indexOf("inflable") !== -1) return "inflable";
+  return "cama";
+}
+
+function obtenerCategoriasHospedaje() {
+  // Escanea el layout REAL del hotel y devuelve solo las categorías que
+  // de verdad existen ahí — así el formulario de costos siempre coincide
+  // con lo que hay armado, sin categorías fijas de más o de menos.
+  const set = {};
+  TRIP_CONFIG.hotel.layout.forEach(function (room) {
+    room.camas.forEach(function (c) { set[categoriaCama(c.tipo)] = true; });
+  });
+  return Object.keys(set);
+}
+
+function sumarConceptosCosto(conceptos, categoria) {
+  if (!conceptos) return 0;
+  return Object.values(conceptos).reduce(function (sum, c) {
+    if (c.variaPorTipo) return sum + (Number(c.variantes && c.variantes[categoria]) || 0);
+    return sum + (Number(c.monto) || 0);
+  }, 0);
+}
+
+function renderConceptosConMontos(conceptos, categoria) {
   // 'conceptos' viene de Firebase (config/conceptosCosto) — 100% editable por el
   // admin desde el sistema, ya NO es una lista fija en el código.
   if (!conceptos || !Object.keys(conceptos).length) {
@@ -2256,7 +2324,7 @@ function renderConceptosConMontos(conceptos, esSofaCama) {
   let html = "";
   Object.values(conceptos).forEach(function (c) {
     let monto = c.monto;
-    if (c.variaPorTipo) monto = esSofaCama ? c.monto_sofa : c.monto_cama;
+    if (c.variaPorTipo) monto = c.variantes && c.variantes[categoria];
     const montoTxt = (monto !== null && monto !== undefined && monto !== "") ? ' — <b>$' + Number(monto).toLocaleString() + '</b>' : "";
     html += '<li style="padding:2px 0;">' + c.nombre + montoTxt + '</li>';
   });
@@ -2271,6 +2339,7 @@ function revelarPestanaPagos() {
   mostrarListaPagos();
   mostrarGastosGrupales();
   mostrarEditorConceptosCosto();
+  cargarMontoMinimoCama();
 }
 
 function agregarAbono() {
@@ -2349,14 +2418,29 @@ function eliminarDevolucion(id, registroKey) {
    agrega/edita/borra conceptos según lo que aplique a CADA viaje,
    nada queda fijo en el código para poder reutilizar el sistema)
    ============================================================ */
+function dibujarCamposCategoriasHospedaje() {
+  const box = document.getElementById("nuevoConceptoMontoDoble");
+  if (!box) return;
+  const categorias = obtenerCategoriasHospedaje();
+  let html = "";
+  categorias.forEach(function (cat) {
+    const label = LABELS_CATEGORIA_HOSPEDAJE[cat] || cat;
+    html += '<label style="font-size:.8em;">Monto para ' + label + ' (MXN)</label>';
+    html += '<input type="number" step="0.01" id="nuevoConceptoMonto_' + cat + '" style="width:100%;padding:8px;margin-bottom:6px;border-radius:8px;border:1px solid #ccc;">';
+  });
+  box.innerHTML = html;
+}
+
 function mostrarEditorConceptosCosto() {
   const box = document.getElementById("listaConceptosCostoBox");
   const txt = document.getElementById("sumaDesgloseCostoTxt");
   if (!box || !database) return;
+  const categorias = obtenerCategoriasHospedaje();
   database.ref(TRIP_CONFIG.firebaseRoot + "/config/conceptosCosto").once("value").then(function (snap) {
     const data = snap.val() || {};
     const keys = Object.keys(data);
-    let sumaCama = 0, sumaSofa = 0;
+    const sumaPorCategoria = {};
+    categorias.forEach(function (cat) { sumaPorCategoria[cat] = 0; });
     let html = "";
     if (!keys.length) {
       html = '<p style="color:#999;font-size:.85em;">Aún no hay conceptos capturados para este viaje.</p>';
@@ -2365,20 +2449,24 @@ function mostrarEditorConceptosCosto() {
       const c = data[key];
       let montoTxt;
       if (c.variaPorTipo) {
-        const mc = Number(c.monto_cama) || 0, ms = Number(c.monto_sofa) || 0;
-        montoTxt = "$" + mc.toLocaleString() + " cama / $" + ms.toLocaleString() + " sofá-cama";
-        sumaCama += mc; sumaSofa += ms;
+        const partes = categorias.map(function (cat) {
+          const m = Number(c.variantes && c.variantes[cat]) || 0;
+          sumaPorCategoria[cat] += m;
+          return (LABELS_CATEGORIA_HOSPEDAJE[cat] || cat) + ": $" + m.toLocaleString();
+        });
+        montoTxt = partes.join(" · ");
       } else {
         const m = Number(c.monto) || 0;
+        categorias.forEach(function (cat) { sumaPorCategoria[cat] += m; });
         montoTxt = "$" + m.toLocaleString();
-        sumaCama += m; sumaSofa += m;
       }
-      html += '<div class="participant-row" style="font-size:.85em;"><span>' + c.nombre + '</span>' +
-        '<span>' + montoTxt + ' <button class="btn danger" style="width:auto;padding:2px 8px;margin-left:6px;" onclick="eliminarConceptoCosto(\'' + escJs(key) + '\')">🗑️</button></span></div>';
+      html += '<div class="participant-row" style="font-size:.85em;flex-direction:column;align-items:flex-start;"><div style="display:flex;justify-content:space-between;width:100%;"><span>' + c.nombre + '</span>' +
+        '<button class="btn danger" style="width:auto;padding:2px 8px;margin-left:6px;" onclick="eliminarConceptoCosto(\'' + escJs(key) + '\')">🗑️</button></div>' +
+        '<span style="font-size:.9em;color:var(--muted);">' + montoTxt + '</span></div>';
     });
     box.innerHTML = html;
     if (txt) {
-      txt.textContent = keys.length ? ("Suma actual: $" + sumaCama.toLocaleString() + " (cama) · $" + sumaSofa.toLocaleString() + " (sofá-cama).") : "";
+      txt.textContent = keys.length ? ("Suma actual: " + categorias.map(function (cat) { return (LABELS_CATEGORIA_HOSPEDAJE[cat] || cat) + " $" + sumaPorCategoria[cat].toLocaleString(); }).join(" · ")) : "";
     }
   });
 }
@@ -2390,8 +2478,11 @@ function agregarConceptoCosto() {
   if (!nombre) { showToast("Escribe el nombre del concepto"); return; }
   const item = { nombre: nombre, variaPorTipo: varia };
   if (varia) {
-    item.monto_cama = parseFloat(document.getElementById("nuevoConceptoMontoCama").value) || 0;
-    item.monto_sofa = parseFloat(document.getElementById("nuevoConceptoMontoSofa").value) || 0;
+    item.variantes = {};
+    obtenerCategoriasHospedaje().forEach(function (cat) {
+      const el = document.getElementById("nuevoConceptoMonto_" + cat);
+      item.variantes[cat] = el ? (parseFloat(el.value) || 0) : 0;
+    });
   } else {
     item.monto = parseFloat(document.getElementById("nuevoConceptoMonto").value) || 0;
   }
@@ -2399,11 +2490,10 @@ function agregarConceptoCosto() {
     showToast("✅ Concepto \"" + nombre + "\" agregado");
     document.getElementById("nuevoConceptoNombre").value = "";
     document.getElementById("nuevoConceptoMonto").value = "";
-    document.getElementById("nuevoConceptoMontoCama").value = "";
-    document.getElementById("nuevoConceptoMontoSofa").value = "";
     document.getElementById("nuevoConceptoVaria").checked = false;
     document.getElementById("nuevoConceptoMontoUnico").style.display = "block";
     document.getElementById("nuevoConceptoMontoDoble").style.display = "none";
+    document.getElementById("nuevoConceptoMontoDoble").innerHTML = "";
     mostrarEditorConceptosCosto();
     mostrarListaPagos();
   });
@@ -2978,7 +3068,8 @@ function mostrarListaPagos() {
       const neto = totalPagadoDe(registros) - totalPagadoDe(devoluciones);
       const tipoCama = tipoCamaPorId[id];
       if (!tipoCama) return;
-      const costoTotal = (tipoCama.indexOf("Sofá-cama") === 0 ? COSTO_SOFA_CAMA : COSTO_CAMA_NORMAL) + saldoGastosGrupalesDe(id);
+      const categoriaTmp = categoriaCama(tipoCama);
+      const costoTotal = sumarConceptosCosto(desgloseCosto, categoriaTmp) + saldoGastosGrupalesDe(id);
       if (neto - costoTotal > 0) pendientesReembolso.push({ id: id, nombre: nombresPorId[id] || id, monto: neto - costoTotal });
     });
     if (pendientesReembolso.length) {
@@ -3003,8 +3094,8 @@ function mostrarListaPagos() {
 
       // Costo real según su tipo de hospedaje (si ya eligió cama) + gastos grupales pendientes
       const tipoCama = tipoCamaPorId[id];
-      const esSofaCama = tipoCama && tipoCama.indexOf("Sofá-cama") === 0;
-      const costoTotal = tipoCama ? (esSofaCama ? COSTO_SOFA_CAMA : COSTO_CAMA_NORMAL) : null;
+      const categoria = categoriaCama(tipoCama);
+      const costoTotal = tipoCama ? sumarConceptosCosto(desgloseCosto, categoria) : null;
       const saldoGastos = saldoGastosGrupalesDe(id);
       const costoTotalConGastos = costoTotal !== null ? (costoTotal + saldoGastos) : null;
       const diferenciaCosto = costoTotalConGastos !== null ? (neto - costoTotalConGastos) : null;
@@ -3013,7 +3104,10 @@ function mostrarListaPagos() {
       html += '<summary style="cursor:pointer;display:flex;justify-content:space-between;font-size:.85em;">' +
         '<span>' + (sinAsiento ? "❓" : (cumple ? "✅" : "⏳")) + ' ' + id + nombreLabel + '</span><span>$' + neto.toLocaleString() + ' neto / $' + MONTO_MINIMO_CAMA.toLocaleString() + '</span></summary>';
       if (diferenciaCosto === null) {
-        html += '<p style="font-size:.78em;color:var(--muted);margin:4px 0;">📌 Aún no elige cama — su costo total exacto ($' + COSTO_CAMA_NORMAL.toLocaleString() + ' cama / $' + COSTO_SOFA_CAMA.toLocaleString() + ' sofá-cama, más gastos grupales) se sabrá en cuanto elija.</p>';
+        const resumenCategorias = obtenerCategoriasHospedaje().map(function (cat) {
+          return (LABELS_CATEGORIA_HOSPEDAJE[cat] || cat) + ": $" + sumarConceptosCosto(desgloseCosto, cat).toLocaleString();
+        }).join(" / ");
+        html += '<p style="font-size:.78em;color:var(--muted);margin:4px 0;">📌 Aún no elige cama — su costo total exacto (' + resumenCategorias + ', más gastos grupales) se sabrá en cuanto elija.</p>';
       }
 
       // Tabla consolidada: abonos, devoluciones, y cada gasto grupal (cuota/efectivo/saldo)
@@ -3045,11 +3139,11 @@ function mostrarListaPagos() {
       });
       html += '<tr style="font-weight:700;border-top:2px solid var(--border);"><td style="padding:4px;" colspan="2">Total pagado (neto)</td><td style="padding:4px;text-align:right;">$' + neto.toLocaleString() + '</td><td></td></tr>';
       if (costoTotalConGastos !== null) {
-        html += '<tr style="font-weight:700;"><td style="padding:4px;" colspan="2">Costo total a cubrir (' + (esSofaCama ? "sofá-cama" : "cama") + (Math.abs(saldoGastos) > 0.01 ? " + gastos grupales" : "") + ')</td><td style="padding:4px;text-align:right;">$' + costoTotalConGastos.toFixed(2) + '</td><td></td></tr>';
+        html += '<tr style="font-weight:700;"><td style="padding:4px;" colspan="2">Costo total a cubrir (' + (LABELS_CATEGORIA_HOSPEDAJE[categoria] || categoria) + (Math.abs(saldoGastos) > 0.01 ? " + gastos grupales" : "") + ')</td><td style="padding:4px;text-align:right;">$' + costoTotalConGastos.toFixed(2) + '</td><td></td></tr>';
         html += '<tr><td colspan="3" style="padding:0;">';
         html += '<details style="padding:4px 8px;"><summary style="cursor:pointer;font-size:.85em;color:var(--primary);">📋 Ver qué incluye este costo</summary>';
         html += '<ul style="margin:6px 0 2px 0;font-size:.85em;">';
-        html += renderConceptosConMontos(desgloseCosto, esSofaCama);
+        html += renderConceptosConMontos(desgloseCosto, categoria);
         if (Math.abs(saldoGastos) > 0.01) {
           html += '<li style="padding:2px 0;">🍽️ Gastos grupales (comida, etc.): $' + saldoGastos.toFixed(2) + ' (ver detalle arriba en la tabla)</li>';
         }
@@ -3139,8 +3233,8 @@ function renderCamas() {
         if (cama && cama.miembros && cama.miembros[idIdentidad()]) miTipoCama = camaTipo.tipo;
       });
     });
-    const esSofaCama = miTipoCama && miTipoCama.indexOf("Sofá-cama") === 0;
-    const costoTotal = miTipoCama ? (esSofaCama ? COSTO_SOFA_CAMA : COSTO_CAMA_NORMAL) : null;
+    const categoria = categoriaCama(miTipoCama);
+    const costoTotal = miTipoCama ? sumarConceptosCosto(desgloseCosto, categoria) : null;
 
     let html = '<h3>🏨 Selecciona tu cama</h3>';
     html += '<p style="font-size:.85em;color:var(--muted);margin-bottom:2px;"><b>🏠 La Estancia Real</b> — Juan Enríquez 1387, Heroica Veracruz, Ver. 91700</p>';
@@ -3149,7 +3243,7 @@ function renderCamas() {
     if (costoTotal !== null) {
       const diferencia = totalPagado - costoTotal;
       html += '<div class="alert ' + (diferencia >= 0 ? "success" : "warning") + '">';
-      html += '💰 Tu costo total es <b>$' + costoTotal.toLocaleString() + '</b> (' + (esSofaCama ? "sofá-cama" : "cama") + '). Llevas pagado: <b>$' + totalPagado.toLocaleString() + '</b>.<br>';
+      html += '💰 Tu costo total es <b>$' + costoTotal.toLocaleString() + '</b> (' + (LABELS_CATEGORIA_HOSPEDAJE[categoria] || categoria) + '). Llevas pagado: <b>$' + totalPagado.toLocaleString() + '</b>.<br>';
       if (diferencia > 0) {
         html += '✅ Pagaste de más — se te reembolsarán <b>$' + diferencia.toLocaleString() + '</b>.';
       } else if (diferencia < 0) {
@@ -3164,11 +3258,14 @@ function renderCamas() {
       html += '<div class="alert danger">⚠️ Llevas $' + totalPagado.toLocaleString() + ' de $' + MONTO_MINIMO_CAMA.toLocaleString() + ' requeridos para poder elegir cama. Consulta tus abonos con los coordinadores.</div>';
     }
     if (costoTotal === null) {
-      html += '<p style="font-size:.8em;color:var(--muted);margin-bottom:10px;">📌 Tu costo total final depende de si te toca <b>cama</b> ($' + COSTO_CAMA_NORMAL.toLocaleString() + ') o <b>sofá-cama</b> ($' + COSTO_SOFA_CAMA.toLocaleString() + ') — se te mostrará exacto en cuanto elijas tu espacio.</p>';
+      const resumenCategorias = obtenerCategoriasHospedaje().map(function (cat) {
+        return "<b>" + (LABELS_CATEGORIA_HOSPEDAJE[cat] || cat) + "</b> ($" + sumarConceptosCosto(desgloseCosto, cat).toLocaleString() + ")";
+      }).join(" o ");
+      html += '<p style="font-size:.8em;color:var(--muted);margin-bottom:10px;">📌 Tu costo total final depende de qué te toca: ' + resumenCategorias + ' — se te mostrará exacto en cuanto elijas tu espacio.</p>';
     }
     html += '<details style="margin-bottom:10px;"><summary style="cursor:pointer;font-size:.85em;font-weight:700;color:var(--primary);">📋 ¿Qué incluye tu pago?</summary>';
     html += '<ul style="margin-top:6px;font-size:.85em;">';
-    html += renderConceptosConMontos(desgloseCosto, esSofaCama);
+    html += renderConceptosConMontos(desgloseCosto, categoria);
     html += '</ul></details>';
     html += '<div class="alert danger">🏠 <b>Es una casa tipo Airbnb, no un hotel</b> — hay que respetar las reglas de la casa. <b>Cualquier daño, multa o cargo extra que cobre el anfitrión por mal comportamiento se le cobrará directamente al responsable</b>, además de su costo del viaje.';
     html += '<details style="margin-top:8px;"><summary style="cursor:pointer;font-weight:700;">📋 Ver reglas y cargos adicionales exactos</summary>';
