@@ -530,6 +530,16 @@ body{
         <button class="btn success" id="asignarCamaBtn">✅ Asignar Cama</button>
       </div>
 
+      <div id="quitarCamaBox" style="display:none;margin-top:14px;padding-top:14px;border-top:1px dashed var(--danger);">
+        <label style="font-weight:700;display:block;margin-bottom:6px;">🗑️ Quitar a alguien de una Cama (corregir duplicados/errores)</label>
+        <p style="font-size:.78em;color:var(--muted);margin-bottom:8px;">Úsalo cuando alguien quedó duplicado en 2 camas, o una cama tiene más gente de la que le cabe. Elige la cama y escribe la matrícula EXACTA de quien quieres sacar.</p>
+        <label style="font-size:.8em;">Cama</label>
+        <select id="quitarCamaSelect" style="width:100%;padding:8px;margin-bottom:8px;border-radius:8px;border:1px solid #ccc;"></select>
+        <label style="font-size:.8em;">Matrícula/empleado a quitar de esa cama</label>
+        <input type="text" id="quitarCamaMatricula" placeholder="U2303057N0061" style="width:100%;padding:8px;margin-bottom:8px;border-radius:8px;border:1px solid #ccc;">
+        <button class="btn danger" id="quitarCamaBtn">🗑️ Quitar de esta Cama</button>
+      </div>
+
       <div id="asignarAsientoBox" style="display:none;margin-top:14px;padding-top:14px;border-top:1px dashed var(--danger);">
         <label style="font-weight:700;display:block;margin-bottom:6px;">🔧 Asignar Asiento Directamente (Admin/Coordinadores)</label>
         <p style="font-size:.78em;color:var(--muted);margin-bottom:8px;">Elige el número de asiento y la persona — se asigna sin requerir anticipo confirmado (es una asignación manual tuya).</p>
@@ -904,7 +914,7 @@ body{
 /* ============================================================
    CONFIGURACIÓN DEL VIAJE - editar aquí lo que cambie cada viaje
    ============================================================ */
-const SIGVA_VERSION = "v2026.08.31-r40"; // Actualizar este texto en cada entrega para poder identificar la versión en pantalla
+const SIGVA_VERSION = "v2026.08.31-r41"; // Actualizar este texto en cada entrega para poder identificar la versión en pantalla
 
 const TRIP_CONFIG = {
   fechaSalida: "2026-08-19T23:00:00-06:00", // Miércoles 19 de agosto, 11:00 PM hora de México (UTC-6)
@@ -1883,6 +1893,7 @@ document.addEventListener("DOMContentLoaded", function () {
       isAdmin = true;
       document.getElementById("adminControls").style.display = "block";
       document.getElementById("asignarCamaBox").style.display = "block";
+      document.getElementById("quitarCamaBox").style.display = "block";
       document.getElementById("asignarAsientoBox").style.display = "block";
       document.getElementById("resetPasswordBox").style.display = "block";
       document.getElementById("comisionesAdminBox").style.display = "block";
@@ -1909,6 +1920,7 @@ document.addEventListener("DOMContentLoaded", function () {
       esCoordinador = true;
       document.getElementById("adminDocsBox").style.display = "block";
       document.getElementById("asignarCamaBox").style.display = "block";
+      document.getElementById("quitarCamaBox").style.display = "block";
       document.getElementById("asignarAsientoBox").style.display = "block";
       document.getElementById("resetPasswordBox").style.display = "block";
       document.getElementById("comisionesAdminBox").style.display = "block";
@@ -1955,6 +1967,7 @@ document.addEventListener("DOMContentLoaded", function () {
     if (this.checked) dibujarCamposCategoriasHospedaje();
   });
   document.getElementById("asignarCamaBtn").addEventListener("click", asignarCamaDirecta);
+  document.getElementById("quitarCamaBtn").addEventListener("click", quitarDeCamaDirecta);
   document.getElementById("asignarAsientoBtn").addEventListener("click", asignarAsientoDirecta);
   document.getElementById("resetPasswordBtn").addEventListener("click", resetearContraseña);
   document.getElementById("guardarComisionBtn").addEventListener("click", guardarComision);
@@ -2710,15 +2723,38 @@ function mostrarResumenPendientes() {
    ============================================================ */
 function poblarSelectCamas() {
   const select = document.getElementById("asignarCamaSelect");
-  if (!select) return;
-  select.innerHTML = "";
-  TRIP_CONFIG.hotel.layout.forEach(function (room, hIdx) {
-    room.camas.forEach(function (cama, cIdx) {
-      const key = claveCamaLayout(hIdx + 1, cIdx + 1);
-      const opt = document.createElement("option");
-      opt.value = key;
-      opt.textContent = room.nombre.replace(/[^\w\s()áéíóúÁÉÍÓÚñÑ]/g, "").trim() + " · " + cama.tipo;
-      select.appendChild(opt);
+  const selectQuitar = document.getElementById("quitarCamaSelect");
+  if (!select && !selectQuitar) return;
+  if (select) select.innerHTML = "";
+  if (selectQuitar) selectQuitar.innerHTML = "";
+  database.ref(TRIP_CONFIG.firebaseRoot + "/camas_hotel").once("value").then(function (snap) {
+    const camas = snap.val() || {};
+    TRIP_CONFIG.hotel.layout.forEach(function (room, hIdx) {
+      room.camas.forEach(function (cama, cIdx) {
+        const key = claveCamaLayout(hIdx + 1, cIdx + 1);
+        const ocupantes = (camas[key] && camas[key].miembros) ? Object.values(camas[key].miembros).map(function (m) { return m.nombre.split(" ")[0]; }) : [];
+        const label = room.nombre.replace(/[^\w\s()áéíóúÁÉÍÓÚñÑ]/g, "").trim() + " · " + cama.tipo + " (" + ocupantes.length + "/" + cama.capacidad + (ocupantes.length ? ": " + ocupantes.join(", ") : "") + ")";
+        if (select) { const opt = document.createElement("option"); opt.value = key; opt.textContent = label; select.appendChild(opt); }
+        if (selectQuitar) { const opt2 = document.createElement("option"); opt2.value = key; opt2.textContent = label; selectQuitar.appendChild(opt2); }
+      });
+    });
+  });
+}
+
+function quitarDeCamaDirecta() {
+  if (!isAdmin && !esCoordinador) { showToast("Solo Admin/Coordinadores pueden hacer esto"); return; }
+  const key = document.getElementById("quitarCamaSelect").value;
+  const id = document.getElementById("quitarCamaMatricula").value.trim().toUpperCase();
+  if (!key) { showToast("Elige una cama"); return; }
+  if (!id) { showToast("Escribe la matrícula/empleado a quitar"); return; }
+  database.ref(TRIP_CONFIG.firebaseRoot + "/camas_hotel/" + key + "/miembros/" + id).once("value").then(function (snap) {
+    if (!snap.val()) { showToast("Esa persona no está en esa cama — revisa la matrícula"); return; }
+    database.ref(TRIP_CONFIG.firebaseRoot + "/camas_hotel/" + key + "/miembros/" + id).remove().then(function () {
+      showToast("✅ " + id + " fue quitado(a) de esa cama");
+      document.getElementById("quitarCamaMatricula").value = "";
+      poblarSelectCamas();
+      renderParticipantes(ultimosAsientosData);
+      if (typeof renderHospedaje === "function") renderHospedaje();
     });
   });
 }
