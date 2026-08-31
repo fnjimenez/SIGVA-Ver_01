@@ -914,7 +914,7 @@ body{
 /* ============================================================
    CONFIGURACIÓN DEL VIAJE - editar aquí lo que cambie cada viaje
    ============================================================ */
-const SIGVA_VERSION = "v2026.08.31-r42"; // Actualizar este texto en cada entrega para poder identificar la versión en pantalla
+const SIGVA_VERSION = "v2026.08.31-r43"; // Actualizar este texto en cada entrega para poder identificar la versión en pantalla
 
 const TRIP_CONFIG = {
   fechaSalida: "2026-08-19T23:00:00-06:00", // Miércoles 19 de agosto, 11:00 PM hora de México (UTC-6)
@@ -2592,7 +2592,17 @@ function generarResumenWhatsApp(id, nombreMostrado) {
 
     msg += "💵 *Total pagado (neto):* $" + neto.toLocaleString() + "\n";
     if (costoTotal !== null) {
-      msg += "🎯 *Costo total de tu viaje:* $" + costoTotal.toLocaleString() + " (" + (LABELS_CATEGORIA_HOSPEDAJE[categoria] || categoria) + ")\n\n";
+      msg += "🎯 *Costo total de tu viaje:* $" + costoTotal.toLocaleString() + " (" + (LABELS_CATEGORIA_HOSPEDAJE[categoria] || categoria) + ")\n";
+      if (Object.keys(conceptos).length) {
+        msg += "\n📋 *Tu costo incluye:*\n";
+        Object.values(conceptos).forEach(function (c) {
+          const monto = c.variaPorTipo ? (c.variantes && c.variantes[categoria]) : c.monto;
+          const montoTxt = (monto !== null && monto !== undefined && monto !== "") ? " — $" + Number(monto).toLocaleString() : "";
+          msg += "▪️ " + c.nombre + montoTxt + "\n";
+        });
+        if (Math.abs(saldoGastos) > 0.01) msg += "▪️ Gastos grupales (comida, etc.) — $" + saldoGastos.toFixed(2) + "\n";
+      }
+      msg += "\n";
       if (diferencia > 0) {
         msg += "✅ *¡Pagaste de más! Se te va a devolver: $" + diferencia.toLocaleString() + "* 💸\n";
       } else if (diferencia < 0) {
