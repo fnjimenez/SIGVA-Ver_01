@@ -914,7 +914,7 @@ body{
 /* ============================================================
    CONFIGURACIÓN DEL VIAJE - editar aquí lo que cambie cada viaje
    ============================================================ */
-const SIGVA_VERSION = "v2026.08.31-r41"; // Actualizar este texto en cada entrega para poder identificar la versión en pantalla
+const SIGVA_VERSION = "v2026.08.31-r42"; // Actualizar este texto en cada entrega para poder identificar la versión en pantalla
 
 const TRIP_CONFIG = {
   fechaSalida: "2026-08-19T23:00:00-06:00", // Miércoles 19 de agosto, 11:00 PM hora de México (UTC-6)
@@ -2522,6 +2522,93 @@ function eliminarConceptoCosto(key) {
   });
 }
 
+/* ============================================================
+   RESUMEN PARA WHATSAPP (por alumno) — junta abonos, devoluciones,
+   gastos grupales y costo total en un mensaje con emojis, y lo
+   abre listo para mandar por WhatsApp (tú eliges el contacto).
+   ============================================================ */
+function generarResumenWhatsApp(id, nombreMostrado) {
+  if (!isAdmin && !esCoordinador) { showToast("Solo Admin/Coordinadores pueden hacer esto"); return; }
+  const root = TRIP_CONFIG.firebaseRoot;
+  Promise.all([
+    database.ref(root + "/pagos/" + id + "/registros").once("value"),
+    database.ref(root + "/devoluciones/" + id + "/registros").once("value"),
+    database.ref(root + "/camas_hotel").once("value"),
+    database.ref(root + "/config/conceptosCosto").once("value"),
+    database.ref(root + "/gastos_grupales").once("value"),
+    database.ref(root + "/asientos").once("value")
+  ]).then(function (snaps) {
+    const registros = snaps[0].val() || {};
+    const devoluciones = snaps[1].val() || {};
+    const camas = snaps[2].val() || {};
+    const conceptos = snaps[3].val() || {};
+    const gastosGrupales = snaps[4].val() || {};
+    const totalParticipantes = Object.keys(snaps[5].val() || {}).length || 1;
+
+    const totalAbonos = totalPagadoDe(registros);
+    const totalDevuelto = totalPagadoDe(devoluciones);
+    const neto = totalAbonos - totalDevuelto;
+
+    let tipoCama = null;
+    TRIP_CONFIG.hotel.layout.forEach(function (room, hIdx) {
+      room.camas.forEach(function (camaTipo, cIdx) {
+        const key = claveCamaLayout(hIdx + 1, cIdx + 1);
+        const cama = camas[key];
+        if (cama && cama.miembros && cama.miembros[id]) tipoCama = camaTipo.tipo;
+      });
+    });
+    const categoria = categoriaCama(tipoCama);
+    const saldoGastos = Object.values(gastosGrupales).reduce(function (sum, g) {
+      const cuota = g.monto / totalParticipantes;
+      const pagadoEfectivo = (g.efectivo && g.efectivo[id]) || 0;
+      return sum + (cuota - pagadoEfectivo);
+    }, 0);
+    const costoTotal = tipoCama ? (sumarConceptosCosto(conceptos, categoria) + saldoGastos) : null;
+    const diferencia = costoTotal !== null ? (neto - costoTotal) : null;
+
+    let msg = "👋 ¡Hola " + (nombreMostrado || "") + "!\n\n";
+    msg += "📋 *Resumen de tu cuenta — Viaje Académico*\n\n";
+
+    if (Object.keys(registros).length) {
+      msg += "💰 *Abonos:*\n";
+      Object.values(registros).forEach(function (r) { msg += "✅ " + r.fecha + " — $" + r.monto.toLocaleString() + "\n"; });
+      msg += "\n";
+    }
+    if (Object.keys(devoluciones).length) {
+      msg += "↩️ *Devoluciones:*\n";
+      Object.values(devoluciones).forEach(function (d) { msg += "💸 " + d.fecha + " " + (d.hora || "") + " — $" + d.monto.toLocaleString() + "\n"; });
+      msg += "\n";
+    }
+    const gastosConDatos = Object.values(gastosGrupales);
+    if (gastosConDatos.length) {
+      msg += "🍽️ *Gastos grupales:*\n";
+      gastosConDatos.forEach(function (g) {
+        const cuota = g.monto / totalParticipantes;
+        const pagadoEfectivo = (g.efectivo && g.efectivo[id]) || 0;
+        msg += "🧾 " + g.nombre + " — cuota $" + cuota.toFixed(2) + (pagadoEfectivo > 0 ? " (ya pagaste $" + pagadoEfectivo.toLocaleString() + " en efectivo ✅)" : " (pendiente ⏳)") + "\n";
+      });
+      msg += "\n";
+    }
+
+    msg += "💵 *Total pagado (neto):* $" + neto.toLocaleString() + "\n";
+    if (costoTotal !== null) {
+      msg += "🎯 *Costo total de tu viaje:* $" + costoTotal.toLocaleString() + " (" + (LABELS_CATEGORIA_HOSPEDAJE[categoria] || categoria) + ")\n\n";
+      if (diferencia > 0) {
+        msg += "✅ *¡Pagaste de más! Se te va a devolver: $" + diferencia.toLocaleString() + "* 💸\n";
+      } else if (diferencia < 0) {
+        msg += "⚠️ *Aún te falta pagar: $" + Math.abs(diferencia).toLocaleString() + "* 🙏\n";
+      } else {
+        msg += "🎉 *¡Ya quedaste al día! No debes ni te sobra nada.*\n";
+      }
+    } else {
+      msg += "📌 Aún no eliges tu espacio para dormir — en cuanto lo hagas, sabremos tu costo total exacto.\n";
+    }
+    msg += "\nCualquier duda, contáctanos 🙌";
+
+    window.open("https://api.whatsapp.com/send?text=" + encodeURIComponent(msg), "_blank");
+  });
+}
+
 function limpiarPagoPorId() {
   if (!isAdmin && !esCoordinador) { showToast("Solo Admin/Coordinadores pueden hacer esto"); return; }
   const id = document.getElementById("limpiarPagoIdInput").value; // SIN trim/uppercase: se borra tal cual se escribió, por si tiene un carácter raro
@@ -3139,6 +3226,7 @@ function mostrarListaPagos() {
       html += '<details style="margin-bottom:6px;padding:4px 8px;' + (sinAsiento ? 'border:1px dashed var(--danger);border-radius:8px;' : '') + '">';
       html += '<summary style="cursor:pointer;display:flex;justify-content:space-between;font-size:.85em;">' +
         '<span>' + (sinAsiento ? "❓" : (cumple ? "✅" : "⏳")) + ' ' + id + nombreLabel + '</span><span>$' + neto.toLocaleString() + ' neto / $' + MONTO_MINIMO_CAMA.toLocaleString() + '</span></summary>';
+      html += '<button class="btn success" style="width:auto;padding:5px 10px;font-size:.78em;margin:6px 0;" onclick="generarResumenWhatsApp(\'' + escJs(id) + '\', \'' + escJs(nombresPorId[id] || "") + '\')">📱 Enviar resumen por WhatsApp</button>';
       if (diferenciaCosto === null) {
         const resumenCategorias = obtenerCategoriasHospedaje().map(function (cat) {
           return (LABELS_CATEGORIA_HOSPEDAJE[cat] || cat) + ": $" + sumarConceptosCosto(desgloseCosto, cat).toLocaleString();
